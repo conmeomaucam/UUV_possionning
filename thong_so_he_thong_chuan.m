@@ -4,6 +4,8 @@ function p = thong_so_he_thong_chuan()
 % 1. DVL A125 (Water Linked): datasheet WL-21037-2, DVL A125 Datasheet v7.
 % 2. INS-DM-FI (Inertial Labs): datasheet INS-DM-FI rev 1.8 (01/2025), IMU-FI-200T.
 % 3. Trái Đất: WGS-84.
+% 4. Chiết áp xoay CTS Series 282 (mã 282TAAR103A25B1): datasheet
+%    282TAAR103A25B1.PDF (CTS Electrocomponents, 2013).
 % Số nào không có trong datasheet thì ghi GIẢ ĐỊNH.
 %
 % Gọi:  p = thong_so_he_thong_chuan();
@@ -77,7 +79,67 @@ p.kich_ban.van_toc_mps = 1.5;
 p.kich_ban.toc_do_quay_deg_s = 6;
 p.kich_ban.huong_dau_deg = 30;    % GIẢ ĐỊNH hướng ban đầu
 
-%% ==================== 4. ĐỔI SANG SI ====================
+%% ==================== 4. CHIẾT ÁP XOAY CTS SERIES 282 ====================
+% Cảm biến GÓC XOAY (chiết áp nhựa dẫn điện), KHÔNG phải cảm biến độ sâu.
+% Trên UUV dùng hợp lý nhất làm phản hồi góc bánh lái / cánh lặn (GIẢ ĐỊNH ứng dụng).
+p.pot.ten = 'Series 282 Precision Potentiometer';
+p.pot.hang = 'CTS Electrocomponents';
+p.pot.datasheet = '282TAAR103A25B1.PDF (2013)';
+p.pot.ma_dat_hang = '282TAAR103A25B1';
+
+% 4.1 Giải mã mã đặt hàng (trang Ordering Information)
+%   282 | T | A | A | R | 103 | A | 2 | 5 | B | 1
+p.pot.ma.series        = '282';          % 16 mm, nhựa dẫn điện
+p.pot.ma.chan          = 'T';            % Solder Lug (Faston)
+p.pot.ma.bac_ren       = 'A';            % Bushing length 5.0 mm
+p.pot.ma.chieu_dai_truc = 'A';           % Shaft length L = 10 mm
+p.pot.ma.dang_truc     = 'R';            % Trục tròn, đường kính 6 mm
+p.pot.ma.dien_tro      = '103';          % 10 kOhm
+p.pot.ma.dung_sai_R    = 'A';            % +-10 %
+p.pot.ma.tuyen_tinh    = '2';            % +-2 %
+p.pot.ma.ip            = '5';            % IP54
+p.pot.ma.goc_xoay      = 'B';            % Tổng 300 độ / hiệu dụng 280 độ
+p.pot.ma.vau_dinh_vi   = '1';            % Vấu định vị trái, 10 mm
+
+% 4.2 Thông số của đúng mã 282TAAR103A25B1
+p.pot.dien_tro_ohm        = 10e3;        % 10 kOhm
+p.pot.dung_sai_dien_tro   = 0.10;        % +-10 %
+p.pot.tuyen_tinh          = 0.02;        % +-2 % (Linearity)
+p.pot.goc_tong_deg        = 300;         % Total rotation angle
+p.pot.goc_hieu_dung_deg   = 280;         % Effective electrical angle
+p.pot.ip_rating           = 'IP54';
+p.pot.duong_kinh_truc_mm  = 6.0;
+p.pot.chieu_dai_truc_mm   = 10.0;
+p.pot.chieu_dai_bac_mm    = 5.0;
+p.pot.ren_bac             = 'M9 x 0.75P (metric) / 3/8"-32 UNEF (imperial)';
+p.pot.vau_dinh_vi         = 'Trái, 10 mm';
+
+% 4.3 Thông số chung của Series 282 (Electrical and Mechanical Specifications)
+p.pot.dai_dien_tro_ohm    = [1e3, 500e3]; % 1 K - 500 K, linear taper
+p.pot.cong_suat_W         = 0.25;         % @ 55 độ C
+p.pot.dien_ap_cach_dien_VDC = 750;        % Dielectric strength, 1 phút
+p.pot.dien_ap_max_VDC     = 500;          % Maximum operating voltage
+p.pot.dien_tro_cach_dien_ohm = 1000e6;    % >= 1000 MOhm @ 500 VDC
+p.pot.cac_goc_xoay_deg    = [250, 300, 360]; % Các tuỳ chọn tổng góc
+p.pot.cac_goc_hieu_dung_deg = [240, 280, 340]; % Tương ứng mã A, B, C
+p.pot.mo_men_xoay_gfcm    = [3, 50];      % Rotational torque
+p.pot.do_ben_chan_kgfcm   = 9;            % Stop strength, tối thiểu
+p.pot.luc_keo_day_truc_kg = 13.6;         % Push-pull, 10 s
+p.pot.lap_dat             = 'Bushing Mount';
+p.pot.tuoi_tho_vong       = 2e6;          % 2 triệu vòng xoay
+p.pot.nhiet_do_hoat_dong_C = [-40, 125];
+p.pot.nhiet_do_luu_kho_C  = [-55, 150];
+p.pot.chiu_nhiet_han      = '350 độ C trong 5 s';
+p.pot.rung_dong           = '15 G, 10 - 2000 Hz';
+p.pot.cac_cap_ip          = {'IP54', 'IP67'};
+
+% Lưu ý: IP54 chỉ chống bụi và nước bắn, KHÔNG chịu ngâm nước.
+% Trên UUV phải đặt trong vỏ kín áp hoặc chọn bản IP67 (mã '6') kèm vỏ bảo vệ.
+
+% 4.4 Mô hình đo cho mô phỏng (GIẢ ĐỊNH, datasheet không cho)
+p.pot.adc_bit = 12;               % GIẢ ĐỊNH: ADC 12 bit đọc điện áp con trượt
+
+%% ==================== 5. ĐỔI SANG SI ====================
 g = p.dat.g;
 p.si.dt_ins = 1.0 / p.ins.gyro.tan_so_Hz;
 p.si.dt_dvl = 1.0 / p.dvl.ping_Hz;
@@ -105,5 +167,15 @@ p.si.acc_bias_tau = p.ins.acc.tau_in_run_s;
 p.si.k_that = p.dvl.k_that;
 p.si.boresight_that_rad = p.dvl.boresight_that_deg * (pi/180);
 p.si.sigma_dvl_fn = @(v_mps) p.dvl.do_chinh_xac_tieu_chuan * abs(v_mps) + p.dvl.san_nhieu_mps;
+
+% Chiết áp CTS 282
+p.si.pot_goc_hieu_dung = p.pot.goc_hieu_dung_deg * (pi/180);              % rad
+% Sai số tuyến tính +-2 % tính trên góc hiệu dụng: 0.02 * 280 = +-5.6 độ (giới hạn)
+p.si.pot_loi_tuyen_tinh_max = p.pot.tuyen_tinh * p.si.pot_goc_hieu_dung;  % rad
+p.si.pot_luong_tu = p.si.pot_goc_hieu_dung / 2^p.pot.adc_bit;              % rad / LSB
+% GIẢ ĐỊNH: lỗi tuyến tính có dạng cong tĩnh hình sin, biên độ bằng giới hạn datasheet
+%   goc_do = goc_that + loi_max * sin(pi * goc_that / goc_hieu_dung), rồi lượng tử ADC
+p.si.pot_do_fn = @(goc_rad) round((goc_rad + p.si.pot_loi_tuyen_tinh_max * ...
+    sin(pi * goc_rad / p.si.pot_goc_hieu_dung)) / p.si.pot_luong_tu) * p.si.pot_luong_tu;
 
 end
