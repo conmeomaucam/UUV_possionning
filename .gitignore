@@ -2,6 +2,8 @@
 *.asv
 *.slxc
 *.mex*
+# Large binary data files
+du_lieu_cam_bien_full.mat
 *.mat.bak
 slprj/
 
