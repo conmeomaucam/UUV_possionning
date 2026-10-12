@@ -125,24 +125,31 @@ yaw_rate = zeros(N, 1);
 
 for i = 1:N
     ti = t(i);
-    if ti < 30
-        % Giai đoạn 1A: Đứng yên thả nổi trên mặt nước (V = 0, chốt GNSS)
+    if ti < 15
+        % Giai đoạn 1A: Đứng yên thả nổi trên mặt nước (V = 0, chốt GNSS 2 anten chuẩn Bắc tuyệt đối)
         V(i) = 0.0;
         yaw_rate(i) = 0.0;
+    elseif ti < 25
+        % Giai đoạn 1B: Tăng tốc êm dịu từ 0 lên 1.5 m/s trên mặt nước
+        tau = (ti - 15) / 10;
+        V(i) = 1.5 * (0.5 - 0.5 * cos(pi * tau));
+        yaw_rate(i) = 0.0;
     elseif ti < T_phase1
-        % Giai đoạn 1B: Bơi thẳng nhẹ trên mặt nước có GNSS hỗ trợ khử Gyro bias
-        tau = (ti - 30) / (T_phase1 - 30);
-        V(i) = 1.0 * (0.5 - 0.5 * cos(pi * tau));
+        % Giai đoạn 1C: Bơi thẳng ổn định 1.5 m/s trên mặt nước, DVL cập nhật cùng GNSS
+        V(i) = 1.5;
         yaw_rate(i) = 0.0;
     else
-        % Giai đoạn 2: LẶN NGẦM (CẮT GNSS) - CƠ ĐỘNG SỐ 8 KHÉP KÍN HIỆU CHUẨN DVL
+        % Giai đoạn 2: LẶN NGẦM (CẮT GNSS) - CƠ ĐỘNG SỐ 8 KHÉP KÍN DẪN ĐƯỜNG DVL
         tr = ti - T_phase1;
         cycle_time = 120;
         tau_8 = mod(tr, cycle_time);
         w_turn = (6 * pi/180); % 6 độ/s -> 60s quay đúng 360 độ
         
         t_trans = 1.0; % Thời gian chuyển bánh lái mượt 1 giây
-        if tau_8 < (60 - t_trans)
+        if tr < t_trans
+            % 1 giây đầu khi vừa bắt đầu lặn: bẻ lái mượt từ 0 đến +w_turn
+            yaw_rate(i) = w_turn * (0.5 - 0.5 * cos(pi * tr / t_trans));
+        elseif tau_8 < (60 - t_trans)
             yaw_rate(i) = +w_turn;
         elseif tau_8 < 60
             s_tr = (tau_8 - (60 - t_trans)) / t_trans;
@@ -154,7 +161,7 @@ for i = 1:N
             yaw_rate(i) = -w_turn * cos(pi * s_tr);
         end
         
-        % Vận tốc Surge biến thiên nhịp nhàng
+        % Vận tốc Surge biến thiên nhịp nhàng quanh 1.5 m/s
         V(i) = 1.5 + 0.4 * sin(4 * pi * tau_8 / 60);
     end
 end
@@ -349,14 +356,25 @@ for i = 1:N
     
     % Ma trận quay Body -> Nav
     Cbn = quat_to_Cbn(q_est);
+    Cnb = Cbn';
     
-    % Tích phân vận tốc và vị trí danh định
-    a_nav = Cbn * f_clean + gn;
+    % BƯỚC 1: BÙ TỰ QUAY TRÁI ĐẤT (w_ie) VÀ CHUYỂN DỊCH ĐỊA LÝ (w_en)
+    lat_i = lat(i);
+    w_ie_nav = W * [cos(lat_i); 0; -sin(lat_i)];
+    sl2_i = sin(lat_i)^2;
+    RN_i = a_e / sqrt(1 - e2 * sl2_i);
+    RM_i = a_e * (1 - e2) / (1 - e2 * sl2_i)^1.5;
+    w_en_nav = [v_est(2)/(RN_i + h(i)); -v_est(1)/(RM_i + h(i)); -v_est(2)*tan(lat_i)/(RN_i + h(i))];
+    w_in_nav = w_ie_nav + w_en_nav;
+    w_nb_body = w_clean - Cnb * w_in_nav; % Tốc độ góc thân tàu tương đối so với khung Nav
+    
+    % Tích phân vận tốc và vị trí danh định (có bù lực Coriolis)
+    a_nav = Cbn * f_clean + gn - cross(2*w_ie_nav + w_en_nav, v_est);
     v_est = v_est + a_nav * dt;
     pos_est = pos_est + v_est * dt;
     
-    % Tích phân Quaternion thái độ
-    dth_step = w_clean * dt;
+    % Tích phân Quaternion thái độ tương đối khung Nav
+    dth_step = w_nb_body * dt;
     dq_step = [cos(norm(dth_step)/2); sin(norm(dth_step)/2) * dth_step / max(norm(dth_step), 1e-12)];
     q_est = quat_nhan(q_est, dq_step);
     q_est = q_est / norm(q_est);
@@ -366,19 +384,18 @@ for i = 1:N
     F_x(1:3, 4:6)   = eye(3) * dt;
     F_x(4:6, 7:9)   = - Cbn * skew_mat(f_clean) * dt;
     F_x(4:6, 10:12) = - Cbn * dt;
-    F_x(7:9, 7:9)   = eye(3) - skew_mat(w_clean) * dt;
+    F_x(7:9, 7:9)   = eye(3) - skew_mat(w_nb_body) * dt;
     F_x(7:9, 13:15) = - eye(3) * dt;
     
     P = F_x * P * F_x' + Q_d;
     
-    % --- [B] CHU KỲ CHẬM 5 Hz: CẬP NHẬT ĐO LƯỜNG 2 PHA ---
+    % --- [B] CHU KỲ CHẬM 5 Hz: CẬP NHẬT ĐO LƯỜNG ĐA CẢM BIẾN ---
     if meas_ptr <= n_meas && idx_meas(meas_ptr) == i
         ti = t(i);
+        
+        % 1. CẬP NHẬT GNSS 2 ANTEN (HOẠT ĐỘNG TRONG PHASE 1: ti <= T_phase1)
         if ti <= T_phase1
-            % =============================================================
-            % PHASE 1: TRÊN MẶT NƯỚC - CẬP NHẬT GNSS 2 ANTEN ĐỊNH CHUẨN BẮC
-            % =============================================================
-            % 1. Đo vị trí và vận tốc GNSS (6x1)
+            % 1.1. Đo vị trí và vận tốc GNSS (6x1)
             z_pv = [Z_gps_pos(meas_ptr, :)'; Z_gps_vel(meas_ptr, :)'];
             h_pv = [pos_est; v_est];
             res_pv = z_pv - h_pv;
@@ -400,7 +417,7 @@ for i = 1:N
             ba_est  = ba_est  + dx_pv(10:12);
             bg_est  = bg_est  + dx_pv(13:15);
             
-            % 2. Đo hướng GNSS 2 anten (Dual-Antenna Heading - 1x1)
+            % 1.2. Đo hướng GNSS 2 anten (Dual-Antenna Heading - 1x1)
             Cbn_cur = quat_to_Cbn(q_est);
             yaw_est = atan2(Cbn_cur(2, 1), Cbn_cur(1, 1));
             res_yaw = atan2(sin(Z_gps_yaw(meas_ptr) - yaw_est), cos(Z_gps_yaw(meas_ptr) - yaw_est));
@@ -428,32 +445,44 @@ for i = 1:N
             G(7:9, 7:9) = eye(3) - 0.5 * skew_mat(dth);
             P = G * P_joseph * G';
             P = 0.5 * (P + P');
-            
-        else
-            % =============================================================
-            % PHASE 2: LẶN NGẦM (CẮT GNSS) - HIỆU CHUẨN DVL KHÉP KÍN
-            % =============================================================
+        end
+        
+        % 2. CẬP NHẬT DVL KHÉP KÍN (CHẠY KHI TÀU CHUYỂN ĐỘNG: CẢ Ở PHASE 1 VÀ PHASE 2!)
+        Cbn_cur = quat_to_Cbn(q_est);
+        Cnb_cur = Cbn_cur';
+        v_b = Cnb_cur * v_est;
+        v_L = v_b + cross(w_clean, lever_arm_est);
+        
+        % Chỉ cập nhật DVL khi có vận tốc chuyển động (tránh nhiễu khi đứng yên)
+        if norm(v_L) > 0.1
             z_m = Z_dvl(meas_ptr, :)';
-            
-            Cbn_cur = quat_to_Cbn(q_est);
-            Cnb_cur = Cbn_cur';
-            v_b = Cnb_cur * v_est;
-            v_L = v_b + cross(w_clean, lever_arm_est);
             
             C_bs_est = eye(3) - skew_mat(phi_bs_est);
             h_val = (1 + s_est) * C_bs_est * v_L;
             residual = z_m - h_val;
             
             H = zeros(3, 19);
-            H(:, 4:6)   = (1 + s_est) * C_bs_est * Cnb_cur;
-            H(:, 7:9)   = (1 + s_est) * C_bs_est * skew_mat(v_b);
-            H(:, 13:15) = (1 + s_est) * C_bs_est * skew_mat(lever_arm_est);
-            H(:, 16)    = C_bs_est * v_L;
-            H(:, 17:19) = (1 + s_est) * skew_mat(v_L);
-            
-            % Khóa Roll boresight và Khóa cột Yaw INS vì đã chốt cực chuẩn ở Phase 1
-            H(:, 17) = 0.0;
-            H(:, 9)  = 0.0;
+            if ti <= T_phase1
+                % GIAI ĐOẠN 1 (MẶT NƯỚC CÓ GNSS 2 ANTEN): CHẾ ĐỘ HIỆU CHUẨN TRỰC TUYẾN DVL
+                % GNSS đã chốt chuẩn Bắc 0.05 deg và vận tốc RTK 2 cm/s cực chuẩn.
+                % DVL chỉ tập trung hiệu chuẩn: Scale s (16), Pitch beta (18), Yaw gamma (19).
+                % Khóa toàn bộ H(:, 1:15) = 0 để tách biệt toán học, triệt tiêu nhiễu chéo vào GNSS!
+                H(:, 16)    = C_bs_est * v_L;
+                H(:, 17:19) = (1 + s_est) * skew_mat(v_L);
+                H(:, 17)    = 0.0; % Khóa Roll boresight
+            else
+                % GIAI ĐOẠN 2 (LẶN NGẦM CẮT GNSS): CHẾ ĐỘ DẪN ĐƯỜNG KẾT HỢP DVL + INS
+                % DVL hỗ trợ vận tốc (4:6), góc nghiêng pitch/roll (7:8), lever arm (13:15)
+                % và tiếp tục ổn định các tham số (16, 18:19).
+                % KHÓA CỘT 9 (YAW INS) ĐỂ DVL KHÔNG VẶN SAI HƯỚNG BẮC CỦA GYRO FOG!
+                H(:, 4:6)   = (1 + s_est) * C_bs_est * Cnb_cur;
+                H(:, 7:9)   = (1 + s_est) * C_bs_est * skew_mat(v_b);
+                H(:, 9)     = 0.0; % Luôn khóa cột Yaw INS
+                H(:, 13:15) = (1 + s_est) * C_bs_est * skew_mat(lever_arm_est);
+                H(:, 16)    = C_bs_est * v_L;
+                H(:, 17:19) = (1 + s_est) * skew_mat(v_L);
+                H(:, 17)    = 0.0; % Khóa Roll boresight
+            end
             
             sig_d = max(s_cfg.sigma_dvl_fn(norm(v_L)), 0.002);
             R_dvl = diag([sig_d^2, sig_d^2, sig_d^2]);
@@ -593,27 +622,30 @@ legend('Thực tế (Ground Truth)', 'Phase 1: Mặt nước GNSS', 'Phase 2: L�
 
 % 2. Hội tụ Scale factor s (%)
 subplot(2, 2, 2);
-plot(t_axis(mask_p2), S_REC(mask_p2), 'b-', 'LineWidth', 1.8); hold on; grid on;
+plot(t, S_REC, 'b-', 'LineWidth', 1.8); hold on; grid on;
 yline(s_that_pct, 'r--', 'LineWidth', 1.5);
-title('Quá trình Hội tụ Hệ số Tỷ lệ s (%)');
-xlabel('Thời gian lặn ngầm (s)'); ylabel('s (%)');
-legend('Ước lượng ES-EKF', 'Giá trị thật (+1.0%)', 'Location', 'best');
+xline(T_phase1, 'k--', 'Lặn ngầm (Cắt GNSS)', 'LineWidth', 1.3, 'LabelOrientation', 'aligned');
+title('Quá trình Hội tụ Hệ số Tỷ lệ s (%) Toàn Nhiệm vụ');
+xlabel('Thời gian nhiệm vụ (s)'); ylabel('s (%)');
+legend('Ước lượng ES-EKF', 'Giá trị thật (+1.0%)', 'Mốc cắt GNSS lặn', 'Location', 'best');
 
 % 3. Hội tụ Pitch Boresight beta (độ)
 subplot(2, 2, 3);
-plot(t_axis(mask_p2), BETA_REC(mask_p2), 'g-', 'LineWidth', 1.8); hold on; grid on;
+plot(t, BETA_REC, 'g-', 'LineWidth', 1.8); hold on; grid on;
 yline(beta_that_deg, 'r--', 'LineWidth', 1.5);
-title('Quá trình Hội tụ Pitch Boresight \beta (độ)');
-xlabel('Thời gian lặn ngầm (s)'); ylabel('\beta (độ)');
-legend('Ước lượng ES-EKF', 'Giá trị thật (-0.3 độ)', 'Location', 'best');
+xline(T_phase1, 'k--', 'Lặn ngầm (Cắt GNSS)', 'LineWidth', 1.3, 'LabelOrientation', 'aligned');
+title('Quá trình Hội tụ Pitch Boresight \beta (độ) Toàn Nhiệm vụ');
+xlabel('Thời gian nhiệm vụ (s)'); ylabel('\beta (độ)');
+legend('Ước lượng ES-EKF', 'Giá trị thật (-0.3 độ)', 'Mốc cắt GNSS lặn', 'Location', 'best');
 
 % 4. Hội tụ Yaw Boresight gamma (độ)
 subplot(2, 2, 4);
-plot(t_axis(mask_p2), GAMMA_REC(mask_p2), 'm-', 'LineWidth', 1.8); hold on; grid on;
+plot(t, GAMMA_REC, 'm-', 'LineWidth', 1.8); hold on; grid on;
 yline(gamma_that_deg, 'r--', 'LineWidth', 1.5);
-title('Quá trình Hội tụ Yaw Boresight \gamma (độ)');
-xlabel('Thời gian lặn ngầm (s)'); ylabel('\gamma (độ)');
-legend('Ước lượng ES-EKF', 'Giá trị thật (+1.0 độ)', 'Location', 'best');
+xline(T_phase1, 'k--', 'Lặn ngầm (Cắt GNSS)', 'LineWidth', 1.3, 'LabelOrientation', 'aligned');
+title('Quá trình Hội tụ Yaw Boresight \gamma (độ) Toàn Nhiệm vụ');
+xlabel('Thời gian nhiệm vụ (s)'); ylabel('\gamma (độ)');
+legend('Ước lượng ES-EKF', 'Giá trị thật (+1.0 độ)', 'Mốc cắt GNSS lặn', 'Location', 'best');
 
 sgtitle('KẾT QUẢ HIỆU CHUẨN DVL VÀ DẪN ĐƯỜNG 2 PHA (PHASE 1 GNSS \rightarrow PHASE 2 DVL)', 'FontSize', 14, 'FontWeight', 'bold');
 

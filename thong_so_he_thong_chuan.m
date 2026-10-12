@@ -95,7 +95,7 @@ p.si.acc_bias_repeat = p.ins.acc.bias_repeatability_mg * 1e-3 * g;         % m/s
 p.si.acc_scale_err = p.ins.acc.scale_factor_ppm * 1e-6;
 p.si.acc_cross_axis = p.ins.acc.cross_axis_mrad * 1e-3;                    % rad
 
-% Cách dùng trong mô phỏng. GIẢ ĐỊNH: coi số datasheet là 1 sigma.
+%  GIẢ ĐỊNH: coi số datasheet là 1 sigma.
 p.si.gyro_bias_sigma = p.si.gyro_bias_repeat;      % bias bật máy, hằng trong 1 lần chạy
 p.si.acc_bias_sigma = p.si.acc_bias_repeat;        % bias bật máy, hằng trong 1 lần chạy
 p.si.acc_bias_inrun_sigma = p.si.acc_bias_in_run;  % trôi chậm Gauss-Markov
