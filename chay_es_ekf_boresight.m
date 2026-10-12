@@ -323,7 +323,7 @@ Q_d(7:9, 7:9)     = (s_cfg.gyro_arw)^2 * dt * eye(3);
 Q_d(10:12, 10:12) = (s_cfg.acc_bias_inrun_sigma)^2 * (2*dt/s_cfg.acc_bias_tau) * eye(3);
 Q_d(13:15, 13:15) = (s_cfg.gyro_bias_sigma * 1e-4)^2 * dt * eye(3);
 % Nhiễu quá trình tham số cơ khí cố định s, beta, gamma (giữ mức làm mịn phẳng lì)
-Q_d(16, 16)       = (5e-7)^2 * dt;              
+Q_d(16, 16)       = (1e-4)^2 * dt;              
 Q_d(18:19, 18:19) = (5e-5 * pi/180)^2 * dt * eye(2);
 
 % Bộ đệm lưu kết quả
