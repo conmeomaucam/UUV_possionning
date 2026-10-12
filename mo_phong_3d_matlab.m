@@ -26,9 +26,12 @@ function mo_phong_3d_matlab()
     dt       = evalin('base', 'dt');
     if evalin('base', 'exist(''T_phase1'', ''var'')')
         T_start = evalin('base', 'T_phase1');
-    else
+    elseif evalin('base', 'exist(''T_can_chinh'', ''var'')')
         T_start = evalin('base', 'T_can_chinh');
+    else
+        T_start = 60;
     end
+    T_can_chinh = T_start;
     
     % Bắt đầu từ khi lặn ngầm bơi số 8
     idx_start = find(t >= T_start, 1);
@@ -115,8 +118,9 @@ function mo_phong_3d_matlab()
     hErrPlot = plot(axErr, nan, nan, 'r-', 'LineWidth', 1.8);
     title(axErr, 'Độ dạt tức thời ||p_{EKF} - p_{TRUE}|| (m)', 'Color', [1 0.4 0.4], 'FontSize', 10);
     xlabel(axErr, 'Thời gian (s)', 'Color', [0.6 0.7 0.8]); ylabel(axErr, 'Sai số (m)');
-    xlim(axErr, [0, t(end) - T_can_chinh]);
-    ylim(axErr, [0, 8]);
+    xlim(axErr, [0, max(1, t(end) - T_start)]);
+    err_all = sqrt(sum((POS_REC(anim_indices, 1:2) - POS_TRUE(anim_indices, 1:2)).^2, 2));
+    ylim(axErr, [0, max(0.5, ceil(max(err_all) * 1.5 * 10) / 10)]);
     
     % Subplot 2: Hội tụ Boresight Yaw Gamma
     axGamma = subplot('Position', [0.73 0.37 0.24 0.23]);
@@ -126,7 +130,7 @@ function mo_phong_3d_matlab()
     hGammaPlot = plot(axGamma, nan, nan, 'm-', 'LineWidth', 1.8);
     title(axGamma, 'Hội tụ Yaw Boresight \gamma (độ) [Đích: +1.0°]', 'Color', [0.9 0.5 1.0], 'FontSize', 10);
     xlabel(axGamma, 'Thời gian (s)'); ylabel(axGamma, '\gamma (độ)');
-    xlim(axGamma, [0, t(end) - T_can_chinh]);
+    xlim(axGamma, [0, max(1, t(end) - T_start)]);
     ylim(axGamma, [-0.5, 2.0]);
     
     % Subplot 3: Bảng chỉ số số liệu thời gian thực (Digital Telemetry)
@@ -157,7 +161,7 @@ function mo_phong_3d_matlab()
         if ~ishandle(hFig), break; end % Người dùng đóng cửa sổ thì dừng
         
         idx = anim_indices(k);
-        t_cur = t(idx) - T_can_chinh;
+        t_cur = t(idx) - T_start;
         
         % Vị trí và hướng tại bước này
         pos_true_k = POS_TRUE(idx, :); % [North, East, Down]
