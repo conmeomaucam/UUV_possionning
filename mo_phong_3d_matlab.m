@@ -24,10 +24,14 @@ function mo_phong_3d_matlab()
     BETA_REC = evalin('base', 'BETA_REC');
     GAMMA_REC= evalin('base', 'GAMMA_REC');
     dt       = evalin('base', 'dt');
-    T_can_chinh = evalin('base', 'T_can_chinh');
+    if evalin('base', 'exist(''T_phase1'', ''var'')')
+        T_start = evalin('base', 'T_phase1');
+    else
+        T_start = evalin('base', 'T_can_chinh');
+    end
     
-    % Bỏ qua 30s cân chỉnh tĩnh đầu tiên
-    idx_start = find(t >= T_can_chinh, 1);
+    % Bắt đầu từ khi lặn ngầm bơi số 8
+    idx_start = find(t >= T_start, 1);
     
     % Lấy mẫu thưa để chuyển động mượt mà 30-50 FPS (mỗi bước nhảy ~0.15s)
     step_skip = round(0.15 / dt); 

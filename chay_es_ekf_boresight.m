@@ -101,10 +101,9 @@ end
 disp('1. Khởi tạo quỹ đạo UUV mượt mà & mô phỏng cảm biến chuẩn datasheet...');
 p = thong_so_he_thong_chuan();
 
-T_can_chinh = 60;   % 60 giây đứng yên căn chỉnh ban đầu
-T_tang_toc  = 10;   % 10 giây tăng tốc mượt mà (0 -> 1.5 m/s)
-T_run       = 1800; % 30 phút (1800 giây) cơ động hình số 8 liên tục
-T_total     = T_can_chinh + T_tang_toc + T_run;
+T_phase1 = 60;   % Phase 1: 60s trên mặt nước có GNSS 2 anten chốt chuẩn Bắc
+T_run    = 600;  % Phase 2: 10 phút (600s = 5 chu kỳ số 8 khép kín lặn ngầm)
+T_total  = T_phase1 + T_run;
 
 rng(1); % Cố định hạt giống nhiễu
 
@@ -120,48 +119,42 @@ s_cfg = p.si;
 N   = round(T_total * fs);
 t   = (0:N-1)' * dt;
 
-% Tạo profile vận tốc và tốc độ quay mượt mà (không có giật gia tốc vô lý)
+% Tạo profile vận tốc và tốc độ quay cho 2 Pha
 V = zeros(N, 1);
 yaw_rate = zeros(N, 1);
 
-t1 = T_can_chinh;
-t2 = T_can_chinh + T_tang_toc;
-
 for i = 1:N
     ti = t(i);
-    if ti < t1
-        % Pha 1: Đứng yên căn chỉnh
+    if ti < 30
+        % Giai đoạn 1A: Đứng yên thả nổi trên mặt nước (V = 0, chốt GNSS)
         V(i) = 0.0;
         yaw_rate(i) = 0.0;
-    elseif ti >= t1 && ti < t2
-        % Pha 2: Tăng tốc mượt từ 0 đến 1.5 m/s bằng hàm sin
-        tau = (ti - t1) / T_tang_toc;
-        V(i) = 1.5 * (0.5 - 0.5 * cos(pi * tau));
+    elseif ti < T_phase1
+        % Giai đoạn 1B: Bơi thẳng nhẹ trên mặt nước có GNSS hỗ trợ khử Gyro bias
+        tau = (ti - 30) / (T_phase1 - 30);
+        V(i) = 1.0 * (0.5 - 0.5 * cos(pi * tau));
         yaw_rate(i) = 0.0;
     else
-        % Pha 3: Cơ động Hình số 8 khép kín 2 vòng tròn đối xứng (Chuẩn thử nghiệm biển)
-        % Chu kỳ 1 hình số 8 = 120s (60s vòng phải 360 độ + 60s vòng trái 360 độ)
-        tr = ti - t2;
+        % Giai đoạn 2: LẶN NGẦM (CẮT GNSS) - CƠ ĐỘNG SỐ 8 KHÉP KÍN HIỆU CHUẨN DVL
+        tr = ti - T_phase1;
         cycle_time = 120;
         tau_8 = mod(tr, cycle_time);
         w_turn = (6 * pi/180); % 6 độ/s -> 60s quay đúng 360 độ
         
-        t_trans = 1.0; % Thời gian chuyển bánh lái 1 giây
+        t_trans = 1.0; % Thời gian chuyển bánh lái mượt 1 giây
         if tau_8 < (60 - t_trans)
             yaw_rate(i) = +w_turn;
         elseif tau_8 < 60
-            % Đổi bánh lái mượt từ +6 sang -6 độ/s
             s_tr = (tau_8 - (60 - t_trans)) / t_trans;
             yaw_rate(i) = +w_turn * cos(pi * s_tr);
         elseif tau_8 < (120 - t_trans)
             yaw_rate(i) = -w_turn;
         else
-            % Đổi bánh lái mượt từ -6 sang +6 độ/s
             s_tr = (tau_8 - (120 - t_trans)) / t_trans;
             yaw_rate(i) = -w_turn * cos(pi * s_tr);
         end
         
-        % Vận tốc Surge biến thiên nhịp nhàng (2 chu kỳ mỗi vòng tròn)
+        % Vận tốc Surge biến thiên nhịp nhàng
         V(i) = 1.5 + 0.4 * sin(4 * pi * tau_8 / 60);
     end
 end
@@ -242,25 +235,43 @@ cy0 = cos(yaw(1)); sy0 = sin(yaw(1));
 Cbn0 = [cy0 -sy0 0; sy0 cy0 0; 0 0 1];
 q0 = dcm_to_quat(Cbn0);
 
-% Sinh dữ liệu DVL 5 Hz
-buoc    = round(fs / p.dvl.ping_Hz);
-idx_dvl = (1:buoc:N)';
-ndvl    = numel(idx_dvl);
+% Sinh dữ liệu đo lường 5 Hz (Cùng chu kỳ buoc = round(fs / 5))
+buoc     = round(fs / 5); % 5 Hz (mỗi 0.2s)
+idx_meas = (1:buoc:N)';
+n_meas   = numel(idx_meas);
 
+% 1. Dữ liệu GNSS 2 anten (Chỉ hoạt động trong Phase 1: t <= T_phase1)
+sig_gps_pos = 0.03;          % Sai số vị trí RTK 3 cm
+sig_gps_vel = 0.02;          % Sai số vận tốc 2 cm/s
+sig_gps_yaw = 0.05 * pi/180; % Sai số góc hướng 2 anten 0.05 độ (chuẩn INS-DM-FI)
+
+Z_gps_pos = zeros(n_meas, 3);
+Z_gps_vel = zeros(n_meas, 3);
+Z_gps_yaw = zeros(n_meas, 1);
+
+for j = 1:n_meas
+    idx = idx_meas(j);
+    if t(idx) <= T_phase1
+        Z_gps_pos(j, :) = POS_TRUE(idx, :) + sig_gps_pos * randn(1, 3);
+        Z_gps_vel(j, :) = v_n(idx, :)      + sig_gps_vel * randn(1, 3);
+        Z_gps_yaw(j)    = yaw(idx)         + sig_gps_yaw * randn;
+    end
+end
+
+% 2. Dữ liệu DVL 5 Hz (Hoạt động khi lặn ngầm trong Phase 2: t > T_phase1)
 s_that  = p.si.k_that;             % 1.0%
 bs_that = p.si.boresight_that_rad; % [Alpha 0.2; Beta -0.3; Gamma 1.0] deg
 Cbs_that = eye(3) - skew_mat(bs_that);
 lever_arm = [0.2; 0.0; -0.1];      % Lever arm thực tế 0.2m
 
-Z_dvl = zeros(ndvl, 3);
-for j = 1:ndvl
-    i  = idx_dvl(j);
-    cy = cos(yaw(i)); sy = sin(yaw(i));
+Z_dvl = zeros(n_meas, 3);
+for j = 1:n_meas
+    idx = idx_meas(j);
+    cy = cos(yaw(idx)); sy = sin(yaw(idx));
     Cnb_y = [cy sy 0; -sy cy 0; 0 0 1];
-    vb = Cnb_y * v_n(i, :)';
-    w_b = w_that(i, :)';
+    vb = Cnb_y * v_n(idx, :)';
+    w_b = w_that(idx, :)';
     v_L = vb + cross(w_b, lever_arm);
-    % DVL đo vận tốc với nhiễu
     sig_m = s_cfg.sigma_dvl_fn(norm(v_L));
     Z_dvl(j, :) = ((1 + s_that) * Cbs_that * v_L + sig_m * randn(3, 1))';
 end
@@ -289,11 +300,11 @@ P = diag([
     (0.01)^2 * ones(1, 3),          ... % 1:3   delta_p (m)
     (0.01)^2 * ones(1, 3),          ... % 4:6   delta_v (m/s)
     (0.2 * pi/180)^2 * ones(1, 2),  ... % 7:8   delta_roll, pitch (rad)
-    (1.0 * pi/180)^2,               ... % 9     delta_yaw (rad)
+    (0.05 * pi/180)^2,              ... % 9     delta_yaw (được định chuẩn bởi GNSS 2 anten Phase 1)
     (0.5e-3 * 9.81)^2 * ones(1, 3), ... % 10:12 delta_ba (m/s^2)
     (0.5 * pi/180 / 3600)^2 * ones(1, 3), ... % 13:15 delta_bg (rad/s)
     (0.02)^2,                       ... % 16    delta_s (độ bất định ban đầu +-2%)
-    (0.01 * pi/180)^2,              ... % 17    delta_alpha (khóa chặt vì không có kích thích Roll)
+    (0.01 * pi/180)^2,              ... % 17    delta_alpha (khóa chặt)
     (1.5 * pi/180)^2,               ... % 18    delta_beta (độ bất định ban đầu +-1.5 độ)
     (1.5 * pi/180)^2                ... % 19    delta_gamma (độ bất định ban đầu +-1.5 độ)
 ]);
@@ -304,8 +315,9 @@ Q_d(4:6, 4:6)     = (s_cfg.acc_vrw)^2 * dt * eye(3);
 Q_d(7:9, 7:9)     = (s_cfg.gyro_arw)^2 * dt * eye(3);
 Q_d(10:12, 10:12) = (s_cfg.acc_bias_inrun_sigma)^2 * (2*dt/s_cfg.acc_bias_tau) * eye(3);
 Q_d(13:15, 13:15) = (s_cfg.gyro_bias_sigma * 1e-4)^2 * dt * eye(3);
-Q_d(16, 16)       = (2e-5)^2 * dt;              % Random walk s: giữ độ thở êm dịu
-Q_d(18:19, 18:19) = (0.002 * pi/180)^2 * dt * eye(2); % Random walk Boresight: giữ độ thở êm dịu
+% Nhiễu quá trình tham số cơ khí cố định s, beta, gamma (giữ mức làm mịn phẳng lì)
+Q_d(16, 16)       = (5e-7)^2 * dt;              
+Q_d(18:19, 18:19) = (5e-5 * pi/180)^2 * dt * eye(2);
 
 % Bộ đệm lưu kết quả
 POS_REC   = zeros(N, 3);
@@ -314,7 +326,7 @@ S_REC     = zeros(N, 1);
 BETA_REC  = zeros(N, 1);
 GAMMA_REC = zeros(N, 1);
 
-dvl_ptr = 1;
+meas_ptr = 1;
 
 %% -------------------------------------------------------------------------
 % BƯỚC 3: VÒNG LẶP THỜI GIAN THỰC (400 Hz INS + 5 Hz DVL CÓ HỒI TIẾP KHÉP KÍN)
@@ -359,82 +371,125 @@ for i = 1:N
     
     P = F_x * P * F_x' + Q_d;
     
-    % --- [B] CHU KỲ CHẬM 5 Hz: CẬP NHẬT ĐO LƯỜNG DVL KHÉP KÍN ---
-    if dvl_ptr <= ndvl && idx_dvl(dvl_ptr) == i
-        z_m = Z_dvl(dvl_ptr, :)';
-        
-        % Vận tốc tại tâm DVL trong Body frame
-        Cbn_cur = quat_to_Cbn(q_est);
-        Cnb_cur = Cbn_cur';
-        v_b = Cnb_cur * v_est;
-        v_L = v_b + cross(w_clean, lever_arm_est);
-        
-        % Mô hình đo dự báo h(x)
-        C_bs_est = eye(3) - skew_mat(phi_bs_est);
-        h_val = (1 + s_est) * C_bs_est * v_L;
-        
-        % Phần dư (Residual)
-        residual = z_m - h_val;
-        
-        % Ma trận Jacobian H (3x19) CHUẨN XÁC THEO JOAN SOLÀ
-        H = zeros(3, 19);
-        H(:, 4:6)   = (1 + s_est) * C_bs_est * Cnb_cur;
-        H(:, 7:9)   = (1 + s_est) * C_bs_est * skew_mat(v_b);
-        H(:, 13:15) = (1 + s_est) * C_bs_est * skew_mat(lever_arm_est);
-        H(:, 16)    = C_bs_est * v_L;
-        H(:, 17:19) = (1 + s_est) * skew_mat(v_L);
-        
-        % Khóa cột Roll boresight vì không có kích thích
-        H(:, 17) = 0.0;
-        
-        % Ma trận nhiễu đo R (3x3)
-        sig_d = max(s_cfg.sigma_dvl_fn(norm(v_L)), 0.002);
-        R_dvl = diag([sig_d^2, sig_d^2, sig_d^2]);
-        
-        % Ma trận đổi mới S
-        S_mat = H * P * H' + R_dvl;
-        d2 = residual' * (S_mat \ residual);
-        
-        % Cổng kiểm định vật lý pha Calibration (Lọc rác âm thanh > 0.5 m/s, không bóp nghẹt bộ lọc)
-        if norm(residual) < 0.5
-            % 1. Kalman Gain K
-            K_gain = (P * H') / S_mat;
+    % --- [B] CHU KỲ CHẬM 5 Hz: CẬP NHẬT ĐO LƯỜNG 2 PHA ---
+    if meas_ptr <= n_meas && idx_meas(meas_ptr) == i
+        ti = t(i);
+        if ti <= T_phase1
+            % =============================================================
+            % PHASE 1: TRÊN MẶT NƯỚC - CẬP NHẬT GNSS 2 ANTEN ĐỊNH CHUẨN BẮC
+            % =============================================================
+            % 1. Đo vị trí và vận tốc GNSS (6x1)
+            z_pv = [Z_gps_pos(meas_ptr, :)'; Z_gps_vel(meas_ptr, :)'];
+            h_pv = [pos_est; v_est];
+            res_pv = z_pv - h_pv;
             
-            % 2. Vector sai số dx (19x1)
-            dx = K_gain * residual;
+            H_pv = zeros(6, 19);
+            H_pv(1:3, 1:3) = eye(3);
+            H_pv(4:6, 4:6) = eye(3);
+            R_pv = diag([sig_gps_pos^2 * ones(1,3), sig_gps_vel^2 * ones(1,3)]);
             
-            % 3. Cập nhật hiệp phương sai Joseph bền vững số học
-            IKH = eye(19) - K_gain * H;
-            P_joseph = IKH * P * IKH' + K_gain * R_dvl * K_gain';
+            S_pv = H_pv * P * H_pv' + R_pv;
+            K_pv = (P * H_pv') / S_pv;
+            dx_pv = K_pv * res_pv;
             
-            % 4. HỒI TIẾP SAI SỐ (INJECTION) VÀO TRẠNG THÁI DANH ĐỊNH
-            pos_est = pos_est + dx(1:3);
-            v_est   = v_est + dx(4:6);
+            IKH_pv = eye(19) - K_pv * H_pv;
+            P = IKH_pv * P * IKH_pv' + K_pv * R_pv * K_pv';
             
-            % Bù thái độ Quaternion (Joan Solà)
-            dth = dx(7:9);
+            pos_est = pos_est + dx_pv(1:3);
+            v_est   = v_est   + dx_pv(4:6);
+            ba_est  = ba_est  + dx_pv(10:12);
+            bg_est  = bg_est  + dx_pv(13:15);
+            
+            % 2. Đo hướng GNSS 2 anten (Dual-Antenna Heading - 1x1)
+            Cbn_cur = quat_to_Cbn(q_est);
+            yaw_est = atan2(Cbn_cur(2, 1), Cbn_cur(1, 1));
+            res_yaw = atan2(sin(Z_gps_yaw(meas_ptr) - yaw_est), cos(Z_gps_yaw(meas_ptr) - yaw_est));
+            
+            H_yaw = zeros(1, 19);
+            H_yaw(1, 9) = 1.0; % Cột 9: delta_theta_z
+            R_yaw = sig_gps_yaw^2;
+            
+            S_yaw = H_yaw * P * H_yaw' + R_yaw;
+            K_yaw = (P * H_yaw') / S_yaw;
+            dx_yaw = K_yaw * res_yaw;
+            
+            IKH_yaw = eye(19) - K_yaw * H_yaw;
+            P_joseph = IKH_yaw * P * IKH_yaw' + K_yaw * R_yaw * K_yaw';
+            
+            dth = dx_yaw(7:9);
             dq_corr = [1; 0.5 * dth];
             dq_corr = dq_corr / norm(dq_corr);
             q_est = quat_nhan(q_est, dq_corr);
             q_est = q_est / norm(q_est);
             
-            % Bù Bias cảm biến
-            ba_est  = ba_est + dx(10:12);
-            bg_est  = bg_est + dx(13:15);
+            bg_est = bg_est + dx_yaw(13:15);
             
-            % TÍCH LŨY THAM SỐ DVL (SCALE FACTOR VÀ BORESIGHT)
-            s_est         = s_est + dx(16);
-            phi_bs_est(2) = phi_bs_est(2) + dx(18); % Pitch beta
-            phi_bs_est(3) = phi_bs_est(3) + dx(19); % Yaw gamma
-            phi_bs_est(1) = 0.0; % Khóa cứng Roll
-            
-            % 5. RESET ESKF VÀ ĐỔI HIỆP PHƯƠNG SAI P <- G * P * G^T
             G = eye(19);
             G(7:9, 7:9) = eye(3) - 0.5 * skew_mat(dth);
             P = G * P_joseph * G';
-            P = 0.5 * (P + P'); % Ép đối xứng
+            P = 0.5 * (P + P');
+            
+        else
+            % =============================================================
+            % PHASE 2: LẶN NGẦM (CẮT GNSS) - HIỆU CHUẨN DVL KHÉP KÍN
+            % =============================================================
+            z_m = Z_dvl(meas_ptr, :)';
+            
+            Cbn_cur = quat_to_Cbn(q_est);
+            Cnb_cur = Cbn_cur';
+            v_b = Cnb_cur * v_est;
+            v_L = v_b + cross(w_clean, lever_arm_est);
+            
+            C_bs_est = eye(3) - skew_mat(phi_bs_est);
+            h_val = (1 + s_est) * C_bs_est * v_L;
+            residual = z_m - h_val;
+            
+            H = zeros(3, 19);
+            H(:, 4:6)   = (1 + s_est) * C_bs_est * Cnb_cur;
+            H(:, 7:9)   = (1 + s_est) * C_bs_est * skew_mat(v_b);
+            H(:, 13:15) = (1 + s_est) * C_bs_est * skew_mat(lever_arm_est);
+            H(:, 16)    = C_bs_est * v_L;
+            H(:, 17:19) = (1 + s_est) * skew_mat(v_L);
+            
+            % Khóa Roll boresight và Khóa cột Yaw INS vì đã chốt cực chuẩn ở Phase 1
+            H(:, 17) = 0.0;
+            H(:, 9)  = 0.0;
+            
+            sig_d = max(s_cfg.sigma_dvl_fn(norm(v_L)), 0.002);
+            R_dvl = diag([sig_d^2, sig_d^2, sig_d^2]);
+            
+            S_mat = H * P * H' + R_dvl;
+            if norm(residual) < 0.5
+                K_gain = (P * H') / S_mat;
+                dx = K_gain * residual;
+                
+                IKH = eye(19) - K_gain * H;
+                P_joseph = IKH * P * IKH' + K_gain * R_dvl * K_gain';
+                
+                pos_est = pos_est + dx(1:3);
+                v_est   = v_est   + dx(4:6);
+                
+                dth = dx(7:9);
+                dq_corr = [1; 0.5 * dth];
+                dq_corr = dq_corr / norm(dq_corr);
+                q_est = quat_nhan(q_est, dq_corr);
+                q_est = q_est / norm(q_est);
+                
+                ba_est  = ba_est + dx(10:12);
+                bg_est  = bg_est + dx(13:15);
+                
+                s_est         = s_est + dx(16);
+                phi_bs_est(2) = phi_bs_est(2) + dx(18); % Pitch beta
+                phi_bs_est(3) = phi_bs_est(3) + dx(19); % Yaw gamma
+                phi_bs_est(1) = 0.0;
+                
+                G = eye(19);
+                G(7:9, 7:9) = eye(3) - 0.5 * skew_mat(dth);
+                P = G * P_joseph * G';
+                P = 0.5 * (P + P');
+            end
         end
-        dvl_ptr = dvl_ptr + 1;
+        meas_ptr = meas_ptr + 1;
     end
     
     % Ghi nhận lịch sử ước lượng
@@ -466,24 +521,27 @@ fprintf('Pitch Beta (deg)   | %12.4f | %13.4f | %12.4f\n', beta_that_deg, beta_f
 fprintf('Yaw Gamma (deg)    | %12.4f | %13.4f | %12.4f\n', gamma_that_deg, gamma_final, gamma_final - gamma_that_deg);
 fprintf('==========================================================================\n');
 
-% Đánh giá sai số vị trí thực tế so với Ground Truth (trong giai đoạn cơ động)
-t_axis = t - T_can_chinh;
-mask = t_axis >= 0;
+% Đánh giá sai số vị trí thực tế so với Ground Truth trong Phase 2 (Lặn ngầm không GNSS)
+t_axis  = t - T_phase1;
+mask_p1 = t <= T_phase1;
+mask_p2 = t > T_phase1;
+mask    = mask_p2;
 
-ERR_POS = sqrt(sum((POS_REC(mask, 1:2) - POS_TRUE(mask, 1:2)).^2, 2));
+ERR_POS = sqrt(sum((POS_REC(mask_p2, 1:2) - POS_TRUE(mask_p2, 1:2)).^2, 2));
 pos_err_max = max(ERR_POS);
 pos_err_rms = rms(ERR_POS);
 pos_err_end = ERR_POS(end);
-total_dist  = sum(sqrt(sum(v_n(mask, 1:2).^2, 2))) * dt;
+total_dist  = sum(sqrt(sum(v_n(mask_p2, 1:2).^2, 2))) * dt;
 drift_rate  = (pos_err_end / max(total_dist, 1e-3)) * 100;
 
-fprintf('\n================ ĐÁNH GIÁ ĐỘ CHÍNH XÁC DẪN ĐƯỜNG (GROUND TRUTH) ================\n');
-fprintf('Tổng quãng đường di chuyển: %10.1f mét (30 phút)\n', total_dist);
-fprintf('Sai số vị trí cực đại     : %10.3f mét\n', pos_err_max);
-fprintf('Sai số vị trí trung phương: %10.3f mét (RMS)\n', pos_err_rms);
-fprintf('Sai số vị trí điểm cuối   : %10.3f mét\n', pos_err_end);
-fprintf('Tỉ lệ trôi dạt tích lũy   : %10.4f %% quãng đường (Chuẩn hàng hải < 0.2%%)\n', drift_rate);
-fprintf('=================================================================================\n');
+fprintf('\n================ ĐÁNH GIÁ ĐỘ CHÍNH XÁC DẪN ĐƯỜNG LẶN NGẦM (PHASE 2) ================\n');
+fprintf('Thời gian lặn ngầm không GPS : %10.1f giây (10 phút cơ động số 8)\n', T_run);
+fprintf('Tổng quãng đường lặn ngầm    : %10.1f mét\n', total_dist);
+fprintf('Sai số vị trí cực đại        : %10.3f mét\n', pos_err_max);
+fprintf('Sai số vị trí trung phương   : %10.3f mét (RMS)\n', pos_err_rms);
+fprintf('Sai số vị trí điểm cuối      : %10.3f mét\n', pos_err_end);
+fprintf('Tỉ lệ trôi dạt tích lũy      : %10.4f %% quãng đường (Chuẩn hàng hải < 0.2%%)\n', drift_rate);
+fprintf('====================================================================================\n');
 
 % Xuất file tham số hiệu chuẩn sẵn sàng nạp cho phần cứng nhúng
 calib_output.s_est = s_final / 100;
@@ -497,30 +555,29 @@ fprintf('   --> Đã lưu file cấu hình hiệu chuẩn: dvl_calib_result.mat\
 %% -------------------------------------------------------------------------
 % BƯỚC 5: VẼ ĐỒ THỊ KIỂM CHỨNG HỘI TỤ
 % -------------------------------------------------------------------------
-t_axis = t - T_can_chinh;
-mask = t_axis >= 0;
+figure('Name', 'QUÁ TRÌNH HỘI TỤ THAM SỐ DVL (ES-EKF 2 PHA)', 'Color', 'w', 'Position', [100 100 1200 650]);
 
-figure('Name', 'QUÁ TRÌNH HỘI TỤ THAM SỐ DVL (ES-EKF KHÉP KÍN)', 'Color', 'w', 'Position', [100 100 1200 650]);
-
-% 1. Đồ thị Quỹ đạo UUV: Đường Thật vs Ước lượng EKF
+% 1. Đồ thị Quỹ đạo UUV: Đường Thật vs Ước lượng EKF (2 Pha)
 subplot(2, 2, 1);
-plot(POS_TRUE(mask, 2), POS_TRUE(mask, 1), 'k--', 'LineWidth', 1.6); hold on; grid on; axis equal;
-plot(POS_REC(mask, 2), POS_REC(mask, 1), 'b-', 'LineWidth', 1.8);
-plot(POS_REC(find(mask,1), 2), POS_REC(find(mask,1), 1), 'r*', 'MarkerSize', 10, 'LineWidth', 2);
+plot(POS_TRUE(:, 2), POS_TRUE(:, 1), 'k--', 'LineWidth', 1.6); hold on; grid on; axis equal;
+plot(POS_REC(mask_p1, 2), POS_REC(mask_p1, 1), 'Color', [1.0 0.55 0.0], 'LineWidth', 2.2); % Phase 1: Mặt nước GNSS
+plot(POS_REC(mask_p2, 2), POS_REC(mask_p2, 1), 'b-', 'LineWidth', 1.8);                      % Phase 2: Lặn ngầm EKF
 
-% Đánh dấu điểm kết thúc của đường Thật và Ước lượng EKF
-idx_end = find(mask, 1, 'last');
+% Đánh dấu các mốc quan trọng
+plot(POS_REC(1, 2), POS_REC(1, 1), 'go', 'MarkerFaceColor', 'g', 'MarkerSize', 7); % Xuất phát
+idx_sub = find(mask_p2, 1);
+plot(POS_REC(idx_sub, 2), POS_REC(idx_sub, 1), 'm^', 'MarkerFaceColor', 'm', 'MarkerSize', 8); % Điểm lặn cắt GPS
+
+idx_end = N;
 plot(POS_TRUE(idx_end, 2), POS_TRUE(idx_end, 1), 'ko', 'MarkerFaceColor', 'k', 'MarkerSize', 7);
 plot(POS_REC(idx_end, 2), POS_REC(idx_end, 1), 'bs', 'MarkerFaceColor', 'b', 'MarkerSize', 7);
 
-% Nối vector độ dạt điểm cuối (Màu đỏ nét gạch)
 plot([POS_TRUE(idx_end, 2), POS_REC(idx_end, 2)], ...
      [POS_TRUE(idx_end, 1), POS_REC(idx_end, 1)], 'r--', 'LineWidth', 2);
 
-% Hộp text hiển thị ĐỊNH LƯỢNG ĐỘ DẠT trực tiếp trên hình
 str_drift = {
-    '\bfĐỘ DẠT HẢI TRÌNH (30 PHÚT):\rm', ...
-    sprintf('• Quãng đường: %.0f m', total_dist), ...
+    '\bfĐỘ DẠT LẶN NGẦM (PHASE 2):\rm', ...
+    sprintf('• Quãng đường lặn: %.0f m', total_dist), ...
     sprintf('• Sai số cực đại: %.2f m', pos_err_max), ...
     sprintf('• Sai số RMS: %.2f m', pos_err_rms), ...
     sprintf('• Dạt điểm cuối: %.2f m', pos_err_end), ...
@@ -529,61 +586,61 @@ str_drift = {
 text(0.03, 0.22, str_drift, 'Units', 'normalized', 'FontSize', 8.5, ...
     'BackgroundColor', [1 1 1 0.90], 'EdgeColor', [0.6 0.6 0.6], 'Margin', 5);
 
-title('Quỹ đạo: Thật (Ground Truth) vs ES-EKF');
+title('Quỹ đạo 2 Pha: Mặt nước (GNSS) \rightarrow Lặn ngầm (DVL)');
 xlabel('Đông (m)'); ylabel('Bắc (m)');
-legend('Thực tế (Ground Truth)', 'Ước lượng ES-EKF', 'Bắt đầu', ...
-       'Đích Thật', 'Đích EKF', 'Vector dạt cuối', 'Location', 'northeast');
+legend('Thực tế (Ground Truth)', 'Phase 1: Mặt nước GNSS', 'Phase 2: Lặn ngầm EKF', ...
+       'Xuất phát', 'Điểm lặn (Cắt GPS)', 'Đích Thật', 'Đích EKF', 'Vector dạt cuối', 'Location', 'northeast');
 
 % 2. Hội tụ Scale factor s (%)
 subplot(2, 2, 2);
-plot(t_axis(mask), S_REC(mask), 'b-', 'LineWidth', 1.8); hold on; grid on;
+plot(t_axis(mask_p2), S_REC(mask_p2), 'b-', 'LineWidth', 1.8); hold on; grid on;
 yline(s_that_pct, 'r--', 'LineWidth', 1.5);
 title('Quá trình Hội tụ Hệ số Tỷ lệ s (%)');
-xlabel('Thời gian cơ động (s)'); ylabel('s (%)');
+xlabel('Thời gian lặn ngầm (s)'); ylabel('s (%)');
 legend('Ước lượng ES-EKF', 'Giá trị thật (+1.0%)', 'Location', 'best');
 
 % 3. Hội tụ Pitch Boresight beta (độ)
 subplot(2, 2, 3);
-plot(t_axis(mask), BETA_REC(mask), 'g-', 'LineWidth', 1.8); hold on; grid on;
+plot(t_axis(mask_p2), BETA_REC(mask_p2), 'g-', 'LineWidth', 1.8); hold on; grid on;
 yline(beta_that_deg, 'r--', 'LineWidth', 1.5);
 title('Quá trình Hội tụ Pitch Boresight \beta (độ)');
-xlabel('Thời gian cơ động (s)'); ylabel('\beta (độ)');
+xlabel('Thời gian lặn ngầm (s)'); ylabel('\beta (độ)');
 legend('Ước lượng ES-EKF', 'Giá trị thật (-0.3 độ)', 'Location', 'best');
 
 % 4. Hội tụ Yaw Boresight gamma (độ)
 subplot(2, 2, 4);
-plot(t_axis(mask), GAMMA_REC(mask), 'm-', 'LineWidth', 1.8); hold on; grid on;
+plot(t_axis(mask_p2), GAMMA_REC(mask_p2), 'm-', 'LineWidth', 1.8); hold on; grid on;
 yline(gamma_that_deg, 'r--', 'LineWidth', 1.5);
 title('Quá trình Hội tụ Yaw Boresight \gamma (độ)');
-xlabel('Thời gian cơ động (s)'); ylabel('\gamma (độ)');
+xlabel('Thời gian lặn ngầm (s)'); ylabel('\gamma (độ)');
 legend('Ước lượng ES-EKF', 'Giá trị thật (+1.0 độ)', 'Location', 'best');
 
-sgtitle('KẾT QUẢ ƯỚC LƯỢNG ĐỒNG THỜI DẪN ĐƯỜNG VÀ HIỆU CHUẨN DVL (ES-EKF)', 'FontSize', 14, 'FontWeight', 'bold');
+sgtitle('KẾT QUẢ HIỆU CHUẨN DVL VÀ DẪN ĐƯỜNG 2 PHA (PHASE 1 GNSS \rightarrow PHASE 2 DVL)', 'FontSize', 14, 'FontWeight', 'bold');
 
 % -------------------------------------------------------------------------
-% HÌNH 2: PHÂN TÍCH CHI TIẾT ĐỘ DẠT VỊ TRÍ THEO THỜI GIAN
+% HÌNH 2: PHÂN TÍCH CHI TIẾT ĐỘ DẠT VỊ TRÍ THEO THỜI GIAN LẶN NGẦM
 % -------------------------------------------------------------------------
-figure('Name', 'PHÂN TÍCH CHI TIẾT ĐỘ DẠT QUỸ ĐẠO THEO THỜI GIAN', 'Color', 'w', 'Position', [150 150 1100 550]);
+figure('Name', 'PHÂN TÍCH CHI TIẾT ĐỘ DẠT QUỸ ĐẠO LẶN NGẦM THEO THỜI GIAN', 'Color', 'w', 'Position', [150 150 1100 550]);
 
 subplot(2, 1, 1);
-plot(t_axis(mask), ERR_POS, 'r-', 'LineWidth', 1.6); hold on; grid on;
+plot(t_axis(mask_p2), ERR_POS, 'r-', 'LineWidth', 1.6); hold on; grid on;
 yline(pos_err_rms, 'b--', sprintf('RMS: %.2f m', pos_err_rms), 'LineWidth', 1.5);
 yline(pos_err_max, 'k:', sprintf('Cực đại: %.2f m', pos_err_max), 'LineWidth', 1.5);
-title('Độ dạt vị trí tức thời ||p_{EKF} - p_{TRUE}|| theo thời gian (m)');
-xlabel('Thời gian cơ động (s)'); ylabel('Độ dạt (m)');
+title('Độ dạt vị trí tức thời ||p_{EKF} - p_{TRUE}|| trong giai đoạn lặn ngầm (m)');
+xlabel('Thời gian lặn ngầm (s)'); ylabel('Độ dạt (m)');
 legend('Sai số tức thời', 'Đường chuẩn RMS', 'Đường cực đại Max', 'Location', 'best');
 
 subplot(2, 1, 2);
-err_N = POS_REC(mask, 1) - POS_TRUE(mask, 1);
-err_E = POS_REC(mask, 2) - POS_TRUE(mask, 2);
-plot(t_axis(mask), err_N, 'b-', 'LineWidth', 1.5); hold on; grid on;
-plot(t_axis(mask), err_E, 'm-', 'LineWidth', 1.5);
+err_N = POS_REC(mask_p2, 1) - POS_TRUE(mask_p2, 1);
+err_E = POS_REC(mask_p2, 2) - POS_TRUE(mask_p2, 2);
+plot(t_axis(mask_p2), err_N, 'b-', 'LineWidth', 1.5); hold on; grid on;
+plot(t_axis(mask_p2), err_E, 'm-', 'LineWidth', 1.5);
 yline(0, 'k--');
-title('Phân tích Độ dạt từng trục: Trục Bắc (\Delta North) và Trục Đông (\Delta East)');
-xlabel('Thời gian cơ động (s)'); ylabel('Độ dạt (m)');
+title('Phân tích Độ dạt từng trục khi lặn: Trục Bắc (\Delta North) và Trục Đông (\Delta East)');
+xlabel('Thời gian lặn ngầm (s)'); ylabel('Độ dạt (m)');
 legend('Độ dạt trục Bắc (\Delta N)', 'Độ dạt trục Đông (\Delta E)', 'Location', 'best');
 
-sgtitle(sprintf('BIỂU ĐỒ ĐỘ DẠT DẪN ĐƯỜNG (Tổng quãng đường: %.0f m | Dạt cuối: %.2f m = %.3f%%)', ...
+sgtitle(sprintf('BIỂU ĐỒ ĐỘ DẠT LẶN NGẦM (Quãng đường: %.0f m | Dạt cuối: %.2f m = %.3f%%)', ...
     total_dist, pos_err_end, drift_rate), 'FontSize', 13, 'FontWeight', 'bold');
 
 %% -------------------------------------------------------------------------
