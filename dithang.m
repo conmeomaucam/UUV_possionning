@@ -25,9 +25,96 @@
 %   - Loại ngoại lai bằng khoảng cách Mahalanobis (Chi-bình phương 99%).
 %
 % Quy ước màu: ĐỎ = Đi thật (Ground Truth), ĐEN = Ước lượng ES-EKF.
+% Chạy một lượt:       dithang
+% Monte Carlo:         summary = dithang('mc', 30);
+% Đổi seed bắt đầu:    summary = dithang('mc', 30, 1001);
 % =========================================================================
 
-clear; close all; clc;
+function result = dithang(mode, varargin)
+if nargin < 1 || isempty(mode)
+    mode = 'single';
+end
+
+if strcmpi(mode, 'mc') || strcmpi(mode, 'montecarlo')
+    n_runs = 30;
+    seed_start = 1;
+    if ~isempty(varargin), n_runs = varargin{1}; end
+    if numel(varargin) >= 2, seed_start = varargin{2}; end
+    validateattributes(n_runs, {'numeric'}, {'scalar', 'integer', 'positive'});
+    validateattributes(seed_start, {'numeric'}, {'scalar', 'integer', 'nonnegative'});
+
+    run_results = repmat(struct( ...
+        'seed', 0, 's_pct', 0, 'beta_deg', 0, 'gamma_deg', 0, ...
+        'alpha_deg', 0, 'alpha_sigma_deg', 0, 'alpha_bound_deg', 0, ...
+        'alpha_independent_fraction', 0, ...
+        'velocity_rmse_ned_mps', zeros(1, 3), ...
+        'horizontal_error_m', 0, 'position_error_m', 0, 'dvl_rejected', 0), n_runs, 1);
+    for run_idx = 1:n_runs
+        run_seed = seed_start + run_idx - 1;
+        fprintf('  Monte Carlo %d/%d, seed %d\n', run_idx, n_runs, run_seed);
+        evalc(sprintf('run_results(%d) = dithang(''single'', %d, false);', run_idx, run_seed));
+    end
+
+    p_mc = thong_so_he_thong_chuan();
+    truth = [p_mc.si.k_that * 100, p_mc.dvl.boresight_that_deg(2:3)', ...
+        p_mc.dvl.boresight_that_deg(1)];
+    estimates = [[run_results.s_pct]', [run_results.beta_deg]', ...
+        [run_results.gamma_deg]', [run_results.alpha_deg]'];
+    errors = estimates - truth;
+    summary.parameter_names = {'s (%)', 'beta (deg)', 'gamma (deg)', 'alpha (deg)'};
+    summary.n_runs = n_runs;
+    summary.seeds = [run_results.seed]';
+    summary.mean_error = mean(errors, 1);
+    summary.std_error = std(errors, 0, 1);
+    summary.rmse = sqrt(mean(errors.^2, 1));
+    summary.abs_error_p95 = zeros(1, size(errors, 2));
+    for parameter_idx = 1:size(errors, 2)
+        sorted_errors = sort(abs(errors(:, parameter_idx)));
+        summary.abs_error_p95(parameter_idx) = sorted_errors(max(1, ceil(0.95 * n_runs)));
+    end
+    summary.mean_final_horizontal_error_m = mean([run_results.horizontal_error_m]);
+    summary.p95_final_horizontal_error_m = percentile95([run_results.horizontal_error_m]);
+    summary.mean_final_position_error_m = mean([run_results.position_error_m]);
+    summary.p95_final_position_error_m = percentile95([run_results.position_error_m]);
+    velocity_rmse_runs = vertcat(run_results.velocity_rmse_ned_mps);
+    summary.mean_velocity_rmse_ned_mps = mean(velocity_rmse_runs, 1);
+    summary.p95_velocity_rmse_ned_mps = zeros(1, 3);
+    for axis_idx = 1:3
+        summary.p95_velocity_rmse_ned_mps(axis_idx) = percentile95(velocity_rmse_runs(:, axis_idx));
+    end
+    summary.mean_alpha_bound_deg = mean([run_results.alpha_bound_deg]);
+    summary.mean_alpha_independent_fraction = mean([run_results.alpha_independent_fraction]);
+    summary.runs = run_results;
+
+    fprintf('\nMonte Carlo: %d lượt, seed %d..%d\n', n_runs, seed_start, seed_start + n_runs - 1);
+    fprintf('Tham số       | Bias TB       | Độ lệch chuẩn | RMSE          | P95 |sai số|\n');
+    for parameter_idx = 1:numel(summary.parameter_names)
+        fprintf('%-13s | %+.6g | %.6g | %.6g | %.6g\n', ...
+            summary.parameter_names{parameter_idx}, summary.mean_error(parameter_idx), ...
+            summary.std_error(parameter_idx), summary.rmse(parameter_idx), ...
+            summary.abs_error_p95(parameter_idx));
+    end
+    fprintf('Sai số ngang cuối: TB %.3f m, P95 %.3f m\n', ...
+        summary.mean_final_horizontal_error_m, summary.p95_final_horizontal_error_m);
+    fprintf('RMSE vận tốc pha lặn NED TB [N E D]: [%.4f %.4f %.4f] m/s\n', ...
+        summary.mean_velocity_rmse_ned_mps);
+    fprintf('Alpha: cận 1-sigma hình học lý tưởng TB %.4g deg; độ nhạy độc lập TB %.2f %%\n', ...
+        summary.mean_alpha_bound_deg, 100 * summary.mean_alpha_independent_fraction);
+    result = summary;
+    return;
+elseif ~strcmpi(mode, 'single')
+    error('Mode phải là ''single'', ''mc'' hoặc ''montecarlo''.');
+end
+
+seed = 1;
+make_plots = true;
+if ~isempty(varargin), seed = varargin{1}; end
+if numel(varargin) >= 2, make_plots = logical(varargin{2}); end
+validateattributes(seed, {'numeric'}, {'scalar', 'integer', 'nonnegative'});
+if make_plots
+    close all;
+    clc;
+end
 
 disp('===================================================================');
 disp('  UUV: HIỆU CHUẨN DVL RECIPROCAL TRACKS + LẶN THẲNG TỚI ĐÍCH');
@@ -37,7 +124,7 @@ disp('===================================================================');
 % BƯỚC 1: THÔNG SỐ
 % -------------------------------------------------------------------------
 p = thong_so_he_thong_chuan();
-rng(1);
+rng(seed, 'twister');
 
 dt  = p.si.dt_ins;
 fs  = p.ins.gyro.tan_so_Hz;
@@ -264,6 +351,7 @@ g_dvl       = DVL_SAI_SO_GM * p.dvl.gm_ti_le_sigma * randn(3, 1);   % sai số t
 G_DVL_REC   = zeros(n_meas, 3);
 
 Z_dvl = zeros(n_meas, 3);
+V_L_TRUE = zeros(n_meas, 3);
 for j = 1:n_meas
     idx = idx_meas(j);
     cy = cos(yaw(idx));   sy = sin(yaw(idx));
@@ -273,6 +361,7 @@ for j = 1:n_meas
              cy*sp,  sy*sp,  cp ];
     vb  = R_n2b * v_n(idx, :)';
     v_L = vb + cross(w_that(idx, :)', lever_arm);
+    V_L_TRUE(j, :) = v_L';
     if DVL_SAI_SO_GM
         g_dvl = phi_dvl_gm * g_dvl + p.dvl.gm_ti_le_sigma * sqrt(1 - phi_dvl_gm^2) * randn(3, 1);
     end
@@ -280,6 +369,8 @@ for j = 1:n_meas
     v_dvl = (1 + s_that) * Cbs_that * v_L;
     Z_dvl(j, :) = (v_dvl + g_dvl .* v_dvl + sigma_dvl(norm(v_L)) * randn(3, 1))';
 end
+alpha_obs = observability_alpha(V_L_TRUE, idx_meas, dt, T_phase1, ...
+    sigma_dvl, s_that, bs_that);
 fprintf('   --> Nhiễu DVL từng ping ở 1.5 m/s : %.1f mm/s mỗi trục (1-sigma)\n', sigma_dvl(1.5) * 1e3);
 if DVL_SAI_SO_GM
     fprintf('   --> Sai số tỷ lệ GM            : sigma %.2f %%, tau %.0f s (bộ lọc không mô hình hóa)\n', ...
@@ -325,12 +416,15 @@ CHI2_3 = 11.34;   % 3 bậc tự do, 99 %
 CHI2_7 = 18.48;   % 7 bậc tự do, 99 %
 
 POS_REC   = zeros(N, 3);
+VEL_REC   = zeros(N, 3);
 YAW_REC   = zeros(N, 1);
 PITCH_REC = zeros(N, 1);
 S_REC     = zeros(N, 1);
 BETA_REC  = zeros(N, 1);
 GAMMA_REC = zeros(N, 1);
 SIG_REC   = zeros(N, 3);   % 1-sigma của s, beta, gamma
+ALPHA_REC = zeros(N, 1);
+SIG_ALPHA_REC = zeros(N, 1);
 n_rej_dvl = 0;
 
 meas_ptr = 1;
@@ -443,12 +537,15 @@ for i = 1:N
     % --- [C] Lưu kết quả ---
     Cbn_now = quat_to_Cbn(q_est);
     POS_REC(i, :) = pos_est';
+    VEL_REC(i, :) = v_est';
     YAW_REC(i)    = atan2(Cbn_now(2, 1), Cbn_now(1, 1));
     PITCH_REC(i)  = -asin(max(min(Cbn_now(3, 1), 1), -1));
     S_REC(i)      = s_est * 100;
     BETA_REC(i)   = phi_bs_est(2) * 180/pi;
     GAMMA_REC(i)  = phi_bs_est(3) * 180/pi;
+    ALPHA_REC(i)  = phi_bs_est(1) * 180/pi;
     SIG_REC(i, :) = [sqrt(P(16,16)) * 100, sqrt(P(18,18)) * 180/pi, sqrt(P(19,19)) * 180/pi];
+    SIG_ALPHA_REC(i) = sqrt(P(17,17)) * 180/pi;
 end
 
 %% -------------------------------------------------------------------------
@@ -457,6 +554,8 @@ end
 mask_p2 = (t > T_phase1);
 ERR_POS = sqrt(sum((POS_REC(mask_p2, :) - POS_TRUE(mask_p2, :)).^2, 2));
 ERR_H   = sqrt(sum((POS_REC(mask_p2, 1:2) - POS_TRUE(mask_p2, 1:2)).^2, 2));
+VEL_ERR_REC = VEL_REC - v_n;
+VEL_RMSE_P2 = sqrt(mean(VEL_ERR_REC(mask_p2, :).^2, 1));
 dist_p2 = sum(sqrt(sum(diff(POS_TRUE(mask_p2, :), 1, 1).^2, 2)));
 
 % Hướng EKF: bỏ bước nhảy +-180 độ của atan2 rồi khớp nhánh 2*pi với giá trị thật
@@ -474,6 +573,10 @@ fprintf('Tham số DVL tại thời điểm cắt GNSS (t = %.0f s):\n', T_phase
 fprintf('  s     = %+.3f %%   (+-%.3f, 1-sigma) | thật +1.000 %%\n', S_REC(idx_end_p1), SIG_REC(idx_end_p1, 1));
 fprintf('  beta  = %+.3f deg (+-%.3f, 1-sigma) | thật -0.300 deg\n', BETA_REC(idx_end_p1), SIG_REC(idx_end_p1, 2));
 fprintf('  gamma = %+.3f deg (+-%.3f, 1-sigma) | thật +1.000 deg\n', GAMMA_REC(idx_end_p1), SIG_REC(idx_end_p1, 3));
+fprintf('  alpha = %+.3f deg (+-%.3f, 1-sigma) | thật %+.3f deg\n', ...
+    ALPHA_REC(idx_end_p1), SIG_ALPHA_REC(idx_end_p1), bs_that(1) * 180/pi);
+fprintf('  alpha hình học lý tưởng: cận 1-sigma %.4g deg, %d mẫu DVL pha GNSS, độ nhạy độc lập %.2f %%\n', ...
+    alpha_obs.sigma_lower_bound_deg, alpha_obs.num_samples, 100 * alpha_obs.independent_fraction);
 fprintf('-------------------------------------------------------------------\n');
 fprintf('Phase 2 (không GNSS):\n');
 fprintf('  Quãng đường lặn               : %.1f m trong %.0f s\n', dist_p2, T_total - T_phase1);
@@ -482,12 +585,28 @@ fprintf('  Vị trí ES-EKF khi tới đích    : [%.1f, %.1f, %.1f] m\n', POS_R
 fprintf('  Sai số vị trí cuối (3D / ngang): %.2f m / %.2f m\n', ERR_POS(end), ERR_H(end));
 fprintf('  Tỉ lệ dạt ngang                : %.3f %% quãng đường\n', ERR_H(end) / dist_p2 * 100);
 fprintf('  Sai số độ sâu cuối            : %.3f m\n', abs(POS_REC(end,3) - POS_TRUE(end,3)));
+fprintf('  RMSE vận tốc pha lặn [N E D]  : [%.4f %.4f %.4f] m/s\n', VEL_RMSE_P2);
 fprintf('  Bản tin DVL bị loại (Chi2)    : %d\n', n_rej_dvl);
 fprintf('===================================================================\n\n');
+
+result = struct( ...
+    'seed', seed, ...
+    's_pct', S_REC(idx_end_p1), ...
+    'beta_deg', BETA_REC(idx_end_p1), ...
+    'gamma_deg', GAMMA_REC(idx_end_p1), ...
+    'alpha_deg', ALPHA_REC(idx_end_p1), ...
+    'alpha_sigma_deg', SIG_ALPHA_REC(idx_end_p1), ...
+    'alpha_bound_deg', alpha_obs.sigma_lower_bound_deg, ...
+    'alpha_independent_fraction', alpha_obs.independent_fraction, ...
+    'velocity_rmse_ned_mps', VEL_RMSE_P2, ...
+    'horizontal_error_m', ERR_H(end), ...
+    'position_error_m', ERR_POS(end), ...
+    'dvl_rejected', n_rej_dvl);
 
 %% -------------------------------------------------------------------------
 % HÌNH 1: QUỸ ĐẠO
 % -------------------------------------------------------------------------
+if make_plots
 figure('Name', 'Quỹ đạo (ĐỎ: thật | ĐEN: ES-EKF)', 'Color', 'w', 'Position', [40 60 1350 650]);
 
 subplot(1, 2, 1);
@@ -567,15 +686,17 @@ legend('Ngang', '3D', 'Location', 'best');
 % HÌNH 3: HỘI TỤ THAM SỐ DVL (kèm biên +-3 sigma)
 % -------------------------------------------------------------------------
 figure('Name', 'Hội tụ tham số DVL', 'Color', 'w', 'Position', [120 80 1200 720]);
-names = {'Hệ số tỉ lệ s (%)', 'Pitch boresight \beta (độ)', 'Yaw boresight \gamma (độ)'};
-truth = [1.0, -0.3, 1.0];
-REC   = [S_REC, BETA_REC, GAMMA_REC];
-cols  = {'b', [0 0.6 0], 'm'};
-for k = 1:3
-    subplot(3, 1, k);
+names = {'Hệ số tỉ lệ s (%)', 'Pitch boresight \beta (độ)', ...
+    'Yaw boresight \gamma (độ)', 'Roll boresight \alpha (độ)'};
+truth = [s_that * 100, bs_that(2:3)' * 180/pi, bs_that(1) * 180/pi];
+REC   = [S_REC, BETA_REC, GAMMA_REC, ALPHA_REC];
+SIG_PLOT = [SIG_REC, SIG_ALPHA_REC];
+cols  = {'b', [0 0.6 0], 'm', [0.85 0.35 0]};
+for k = 1:4
+    subplot(4, 1, k);
     h1 = plot(t, REC(:,k), '-', 'Color', cols{k}, 'LineWidth', 1.8); hold on; grid on;
-    h2 = plot(t, truth(k) + 3*SIG_REC(:,k), ':', 'Color', [0.4 0.4 0.4]);
-    plot(t, truth(k) - 3*SIG_REC(:,k), ':', 'Color', [0.4 0.4 0.4]);
+    h2 = plot(t, truth(k) + 3*SIG_PLOT(:,k), ':', 'Color', [0.4 0.4 0.4]);
+    plot(t, truth(k) - 3*SIG_PLOT(:,k), ':', 'Color', [0.4 0.4 0.4]);
     h3 = yline(truth(k), 'r--', 'Giá trị thật', 'LineWidth', 1.3);
     xline(T_turn_start, 'k:', 'Quay đầu');
     xline(T_phase1, 'm--', 'Cắt GNSS');
@@ -584,22 +705,83 @@ for k = 1:3
     legend([h1 h2 h3], {'ES-EKF', 'thật \pm 3\sigma (từ P)', 'Giá trị thật'}, 'Location', 'best');
 end
 
+figure('Name', 'Vận tốc NED: thật và ES-EKF', 'Color', 'w', 'Position', [160 100 1100 720]);
+axis_names = {'North (N)', 'East (E)', 'Down (D)'};
+velocity_labels = {'v_N (m/s)', 'v_E (m/s)', 'v_D (m/s)'};
+for axis_idx = 1:3
+    subplot(3, 1, axis_idx);
+    plot(t, v_n(:, axis_idx), 'r-', 'LineWidth', 1.8); hold on; grid on;
+    plot(t, VEL_REC(:, axis_idx), 'k--', 'LineWidth', 1.4);
+    xline(T_phase1, 'm--', 'Cắt GNSS');
+    xlabel('t (s)'); ylabel(velocity_labels{axis_idx});
+    title(['Vận tốc thật và ES-EKF theo trục ', axis_names{axis_idx}]);
+    legend('Thật', 'ES-EKF', 'Location', 'best');
+    xlim([0, T_total]);
+end
+
 % Đồng bộ sang workspace cho mo_phong_3d_matlab.m
 assignin('base', 'POS_TRUE', POS_TRUE);
 assignin('base', 'POS_REC', POS_REC);
+assignin('base', 'v_n', v_n);
+assignin('base', 'VEL_REC', VEL_REC);
+assignin('base', 'VEL_ERR_REC', VEL_ERR_REC);
 assignin('base', 'yaw', yaw);
 assignin('base', 'V', V);
 assignin('base', 't', t);
 assignin('base', 'S_REC', S_REC);
 assignin('base', 'BETA_REC', BETA_REC);
 assignin('base', 'GAMMA_REC', GAMMA_REC);
+assignin('base', 'ALPHA_REC', ALPHA_REC);
 assignin('base', 'dt', dt);
 assignin('base', 'T_phase1', T_phase1);
 assignin('base', 'T_can_chinh', T_phase1);
+end
+
+end
 
 %% -------------------------------------------------------------------------
 % HÀM PHỤ TRỢ
 % -------------------------------------------------------------------------
+function obs = observability_alpha(v_l_history, measurement_indices, dt, phase1_end, sigma_fn, scale_true, boresight_true)
+    % Cận tham số-only: xem vận tốc GNSS và tư thế tham chiếu là đã biết.
+    jacobian = zeros(3 * numel(measurement_indices), 4);
+    valid_samples = 0;
+    C_bs_true = eye(3) - skew_mat(boresight_true);
+    for sample_idx = 1:numel(measurement_indices)
+        sample_time = (measurement_indices(sample_idx) - 1) * dt;
+        v_l = v_l_history(sample_idx, :)';
+        if sample_time > phase1_end || norm(v_l) <= 0.3
+            continue;
+        end
+        H_scale = C_bs_true * v_l;
+        H_boresight = (1 + scale_true) * skew_mat(v_l);
+        sigma = max(sigma_fn(norm(v_l)), 0.002);
+        row_idx = 3 * valid_samples + (1:3);
+        jacobian(row_idx, :) = [H_scale, H_boresight] / sigma;
+        valid_samples = valid_samples + 1;
+    end
+
+    jacobian = jacobian(1:3 * valid_samples, :);
+    obs.num_samples = valid_samples;
+    if valid_samples == 0
+        obs.sigma_lower_bound_deg = Inf;
+        obs.independent_fraction = 0;
+        return;
+    end
+
+    alpha_column = jacobian(:, 2);
+    nuisance_columns = jacobian(:, [1, 3, 4]);
+    alpha_independent = alpha_column - nuisance_columns * (nuisance_columns \ alpha_column);
+    alpha_information = alpha_independent' * alpha_independent;
+    obs.sigma_lower_bound_deg = (180 / pi) / sqrt(max(alpha_information, eps));
+    obs.independent_fraction = norm(alpha_independent) / max(norm(alpha_column), eps);
+end
+
+function value = percentile95(samples)
+    sorted_samples = sort(samples(:));
+    value = sorted_samples(max(1, ceil(0.95 * numel(sorted_samples))));
+end
+
 function [dx, P, ok] = kf_update(P, H, res, R, chi2_gate)
     % Cập nhật Kalman dạng Joseph, có cổng Mahalanobis
     S  = H * P * H' + R;
