@@ -11,12 +11,6 @@ p = thong_so_he_thong_chuan();
 rng(17, 'twister');
 
 dt = p.si.dt_ins;
-	gyro_limit = p.ins.gyro.dai_do_deg_s * pi/180;
-	accel_limit = p.ins.acc.dai_do_g * g;
-	gyro_saturation_count = nnz(abs(gyro_meas) > gyro_limit);
-	accel_saturation_count = nnz(abs(accel_meas) > accel_limit);
-	gyro_meas = min(max(gyro_meas, -gyro_limit), gyro_limit);
-	accel_meas = min(max(accel_meas, -accel_limit), accel_limit);
 fs = p.ins.gyro.tan_so_Hz;
 g = p.dat.g;
 gn = [0; 0; g];
@@ -64,13 +58,12 @@ for i = 1:N_max
 	if ti < T_cal
 		roll = 0;
 		pitch = 0;
+		if ti < 30
+			speed = 0;
+			yaw = psi_reverse;
+		elseif ti < 40
+			ramp = (ti - 30) / 10;
 			speed = V_cruise * (0.5 - 0.5 * cos(pi * ramp));
-gyro_limit = p.ins.gyro.dai_do_deg_s * pi/180;
-accel_limit = p.ins.acc.dai_do_g * g;
-gyro_saturation_count = nnz(abs(gyro_meas) > gyro_limit);
-accel_saturation_count = nnz(abs(accel_meas) > accel_limit);
-gyro_meas = min(max(gyro_meas, -gyro_limit), gyro_limit);
-accel_meas = min(max(accel_meas, -accel_limit), accel_limit);
 			yaw = psi_reverse;
 		elseif ti < 110
 			speed = V_cruise;
