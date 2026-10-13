@@ -31,6 +31,18 @@ p.dvl.san_nhieu_mps = 0.1e-3;        % GIẢ ĐỊNH sàn nhiễu = phân giải
 % Lưu ý: ±0.1% là độ chính xác dài hạn, KHÔNG phải nhiễu từng ping.
 % Dùng làm nhiễu từng ping là GIẢ ĐỊNH.
 
+% Mô hình nhiễu DVL mức thực tế (dùng trong dithang.m)
+% Datasheet A125 KHÔNG công bố độ lệch chuẩn từng ping. Các số dưới đây
+% là GIẢ ĐỊNH cỡ DVL 400-600 kHz khi bám đáy tốt; có thể đối chiếu bằng
+% trường "fom" (m/s) mà A125 trả về theo từng ping khi chạy thật.
+% (a) Nhiễu trắng từng ping, mỗi trục: sigma = san + ti_le * |v|
+p.dvl.ping_noise_san_mps = 5e-3;     % GIẢ ĐỊNH 5 mm/s
+p.dvl.ping_noise_ti_le   = 2e-3;     % GIẢ ĐỊNH 0.2 % |v|  (=> ~8 mm/s ở 1.5 m/s)
+% (b) Sai số tương quan chậm (Gauss-Markov) - đại diện cho ±0.1 % dài hạn:
+%     thay đổi theo loại đáy, nhiệt độ/độ mặn (tốc độ âm)... Bộ lọc KHÔNG mô hình hóa.
+p.dvl.gm_ti_le_sigma = p.dvl.do_chinh_xac_tieu_chuan; % 0.1 % |v|, coi là 1-sigma (GIẢ ĐỊNH)
+p.dvl.gm_tau_s       = 300;          % GIẢ ĐỊNH thời hằng tương quan 300 s
+
 % Đáp án ẩn cho mô phỏng. GIẢ ĐỊNH, không có trong datasheet.
 p.dvl.k_that = 0.01;                          % 1%
 p.dvl.boresight_that_deg = [0.2; -0.3; 1.0];  % [Alpha roll; Beta pitch; Gamma yaw], độ
@@ -167,6 +179,8 @@ p.si.acc_bias_tau = p.ins.acc.tau_in_run_s;
 p.si.k_that = p.dvl.k_that;
 p.si.boresight_that_rad = p.dvl.boresight_that_deg * (pi/180);
 p.si.sigma_dvl_fn = @(v_mps) p.dvl.do_chinh_xac_tieu_chuan * abs(v_mps) + p.dvl.san_nhieu_mps;
+% Nhiễu trắng từng ping mức thực tế (m/s, mỗi trục)
+p.si.sigma_dvl_ping_fn = @(v_mps) p.dvl.ping_noise_san_mps + p.dvl.ping_noise_ti_le * abs(v_mps);
 
 % Chiết áp CTS 282
 p.si.pot_goc_hieu_dung = p.pot.goc_hieu_dung_deg * (pi/180);              % rad

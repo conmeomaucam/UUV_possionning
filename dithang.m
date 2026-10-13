@@ -243,11 +243,25 @@ Z_gps_yaw = yaw(idx_meas)         + sig_gps_yaw * randn(n_meas, 1);
 % Cảm biến độ sâu
 Z_depth = POS_TRUE(idx_meas, 3) + sig_depth * randn(n_meas, 1);
 
-% DVL: (1 + s) * C_bs * (v_b + w x l) + nhiễu
+% DVL: (1 + s) * C_bs * (v_b + w x l) + sai số tương quan chậm + nhiễu trắng
 s_that   = p.si.k_that;               % +1.0 %
 bs_that  = p.si.boresight_that_rad;   % [alpha 0.2; beta -0.3; gamma 1.0] độ
 Cbs_that = eye(3) - skew_mat(bs_that);
 lever_arm = [0.2; 0.0; -0.1];
+
+% Công tắc mô hình nhiễu DVL
+DVL_NHIEU_THUC_TE = true;   % false = nhiễu lý tưởng cũ (0.1 % |v| + 0.1 mm/s)
+DVL_SAI_SO_GM     = true;   % sai số tỷ lệ tương quan chậm, bộ lọc KHÔNG biết
+
+if DVL_NHIEU_THUC_TE
+    sigma_dvl = s_cfg.sigma_dvl_ping_fn;
+else
+    sigma_dvl = s_cfg.sigma_dvl_fn;
+end
+dt_dvl_meas = dt * (idx_meas(2) - idx_meas(1));
+phi_dvl_gm  = exp(-dt_dvl_meas / p.dvl.gm_tau_s);
+g_dvl       = DVL_SAI_SO_GM * p.dvl.gm_ti_le_sigma * randn(3, 1);   % sai số tỷ lệ theo trục
+G_DVL_REC   = zeros(n_meas, 3);
 
 Z_dvl = zeros(n_meas, 3);
 for j = 1:n_meas
@@ -259,8 +273,17 @@ for j = 1:n_meas
              cy*sp,  sy*sp,  cp ];
     vb  = R_n2b * v_n(idx, :)';
     v_L = vb + cross(w_that(idx, :)', lever_arm);
-    sig_m = s_cfg.sigma_dvl_fn(norm(v_L));
-    Z_dvl(j, :) = ((1 + s_that) * Cbs_that * v_L + sig_m * randn(3, 1))';
+    if DVL_SAI_SO_GM
+        g_dvl = phi_dvl_gm * g_dvl + p.dvl.gm_ti_le_sigma * sqrt(1 - phi_dvl_gm^2) * randn(3, 1);
+    end
+    G_DVL_REC(j, :) = g_dvl';
+    v_dvl = (1 + s_that) * Cbs_that * v_L;
+    Z_dvl(j, :) = (v_dvl + g_dvl .* v_dvl + sigma_dvl(norm(v_L)) * randn(3, 1))';
+end
+fprintf('   --> Nhiễu DVL từng ping ở 1.5 m/s : %.1f mm/s mỗi trục (1-sigma)\n', sigma_dvl(1.5) * 1e3);
+if DVL_SAI_SO_GM
+    fprintf('   --> Sai số tỷ lệ GM            : sigma %.2f %%, tau %.0f s (bộ lọc không mô hình hóa)\n', ...
+        p.dvl.gm_ti_le_sigma * 100, p.dvl.gm_tau_s);
 end
 
 %% -------------------------------------------------------------------------
@@ -403,7 +426,8 @@ for i = 1:N
             H(:, 16)    = C_bs * v_L;                               % ds
             H(:, 17:19) = (1 + s_est) * skew_mat(v_L);              % dphi_bs
 
-            sig_d = 1.5 * s_cfg.sigma_dvl_fn(norm(v_L));
+            % R chỉ gồm phần nhiễu trắng; sai số GM không được khai báo cho bộ lọc
+            sig_d = sigma_dvl(norm(v_L));
             [dx, P, ok] = kf_update(P, H, res, sig_d^2 * eye(3), CHI2_3);
             if ok
                 [pos_est, v_est, q_est, ba_est, bg_est, s_est, phi_bs_est, P] = ...
@@ -501,11 +525,13 @@ plot(t, yaw_ekf*180/pi, 'k--', 'LineWidth', 1.4);
 xline(T_phase1, 'm--', 'Cắt GNSS');
 xlabel('t (s)'); ylabel('\psi (độ)'); title('Góc hướng \psi(t)');
 legend('Thật', 'ES-EKF', 'Location', 'best');
+xlim([0, T_total]);
 
 subplot(3, 2, 2);
 plot(t, ERR_YAW, 'k-', 'LineWidth', 1.2); grid on;
 xline(T_phase1, 'm--', 'Cắt GNSS');
 xlabel('t (s)'); ylabel('độ'); title('Sai số hướng \psi_{EKF} - \psi_{thật}');
+xlim([0, T_total]);
 
 subplot(3, 2, 3);
 plot(t, pitch*180/pi, 'r-', 'LineWidth', 2.0); hold on; grid on;
@@ -513,11 +539,13 @@ plot(t, PITCH_REC*180/pi, 'k--', 'LineWidth', 1.4);
 xline(T_phase1, 'm--', 'Cắt GNSS');
 xlabel('t (s)'); ylabel('\theta (độ)'); title('Góc pitch \theta(t)');
 legend('Thật', 'ES-EKF', 'Location', 'best');
+xlim([0, T_total]);
 
 subplot(3, 2, 4);
 plot(t, ERR_PITCH, 'k-', 'LineWidth', 1.2); grid on;
 xline(T_phase1, 'm--', 'Cắt GNSS');
 xlabel('t (s)'); ylabel('độ'); title('Sai số pitch \theta_{EKF} - \theta_{thật}');
+xlim([0, T_total]);
 
 subplot(3, 2, 5);
 plot(t, POS_TRUE(:,3), 'r-', 'LineWidth', 2.0); hold on; grid on;
@@ -527,6 +555,7 @@ xline(T_phase1, 'm--', 'Cắt GNSS');
 set(gca, 'YDir', 'reverse');
 xlabel('t (s)'); ylabel('Z (m)'); title('Độ sâu Z(t)');
 legend('Thật', 'ES-EKF', 'Location', 'best');
+xlim([0, T_total]);
 
 subplot(3, 2, 6);
 plot(t(mask_p2) - T_phase1, ERR_H, 'k-', 'LineWidth', 1.6); hold on; grid on;
