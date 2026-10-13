@@ -254,126 +254,78 @@ for k = 1:n_measurements
 	Z_dvl(k, :) = (ideal + dvl_gm .* ideal + white)';
 end
 
-% ES-EKF error state: dp, dv, dtheta, dba, dbg, ds, d(alpha,beta,gamma).
-pos_est = [0; 0; 0];
-vel_est = [0; 0; 0];
-q_est = quat_from_euler(roll_true(1), pitch_true(1), yaw_true(1));
-ba_est = zeros(3, 1);
-bg_est = zeros(3, 1);
-s_est = 0;
-boresight_est = zeros(3, 1);
+% Target core: fixed-size nominal state, error covariance and process noise.
+noise_cfg = [s.acc_vrw; s.gyro_arw; s.acc_bias_inrun_sigma; ...
+	s.acc_bias_tau; s.gyro_bias_sigma*1e-4; 5e-7; 5e-5*pi/180; dt];
+[estimator_state, P, Q] = esekf19_init( ...
+	[roll_true(1); pitch_true(1); yaw_true(1)], g, noise_cfg);
 
-P = diag([(0.02)^2 * ones(1, 3), (0.05)^2 * ones(1, 3), ...
-	(0.5*pi/180)^2 * ones(1, 3), (0.5e-3*g)^2 * ones(1, 3), ...
-	(0.5*pi/180/3600)^2 * ones(1, 3), (0.02)^2, ...
-	(1.5*pi/180)^2 * ones(1, 3)]);
-Q = zeros(19, 19);
-Q(4:6, 4:6) = s.acc_vrw^2 * dt * eye(3);
-Q(7:9, 7:9) = s.gyro_arw^2 * dt * eye(3);
-Q(10:12, 10:12) = s.acc_bias_inrun_sigma^2 * (2*dt/s.acc_bias_tau) * eye(3);
-Q(13:15, 13:15) = (s.gyro_bias_sigma*1e-4)^2 * dt * eye(3);
-Q(16, 16) = (5e-7)^2 * dt;
-Q(17:19, 17:19) = (5e-5*pi/180)^2 * dt * eye(3);
+% cfg indices are documented in esekf19_step.m and remain fixed for codegen.
+filter_cfg = zeros(18, 1);
+filter_cfg(1) = dt;
+filter_cfg(2) = g;
+filter_cfg(3:5) = w_ie;
+filter_cfg(6) = RN;
+filter_cfg(7) = RM;
+filter_cfg(8) = tan(latitude);
+filter_cfg(9) = height;
+filter_cfg(10:12) = lever_arm;
+filter_cfg(13) = p.dvl.ping_noise_san_mps;
+filter_cfg(14) = p.dvl.ping_noise_ti_le;
+filter_cfg(15) = sigma_gps_pos;
+filter_cfg(16) = sigma_gps_vel;
+filter_cfg(17) = sigma_gps_yaw;
+filter_cfg(18) = sigma_depth;
 
 position_est_history = zeros(N, 3);
 velocity_est_history = zeros(N, 3);
 attitude_est_history = zeros(N, 3);
+
 parameter_history = zeros(N, 4);
 parameter_sigma_history = zeros(N, 4);
 measurement_ptr = 1;
 n_dvl_rejected = 0;
 n_dvl_used = 0;
-CHI2_3 = 11.34;
-CHI2_7 = 18.48;
 
 for i = 1:N
-	Cbn_est = quat_to_Cbn(q_est);
-	Cnb_est = Cbn_est';
-	f_clean = accel_meas(i, :)' - ba_est;
-	w_clean = gyro_meas(i, :)' - bg_est;
-	w_ie_n = w_ie;
-	w_en_n = [vel_est(2) / (RN + height); -vel_est(1) / (RM + height); ...
-		-vel_est(2) * tan(latitude) / (RN + height)];
-	w_nb_b = w_clean - Cnb_est * (w_ie_n + w_en_n);
-	accel_n = Cbn_est * f_clean + [0; 0; g] - cross(2*w_ie_n + w_en_n, vel_est);
-	vel_est = vel_est + accel_n * dt;
-	pos_est = pos_est + vel_est * dt;
-
-	delta_angle = w_nb_b * dt;
-	angle_norm = norm(delta_angle);
-	dq = [cos(angle_norm/2); sin(angle_norm/2) * delta_angle / max(angle_norm, 1e-12)];
-	q_est = quat_multiply(q_est, dq);
-	q_est = q_est / norm(q_est);
-
-	F = eye(19);
-	F(1:3, 4:6) = eye(3) * dt;
-	F(4:6, 7:9) = -Cbn_est * skew_mat(f_clean) * dt;
-	F(4:6, 10:12) = -Cbn_est * dt;
-	F(7:9, 7:9) = eye(3) - skew_mat(w_nb_b) * dt;
-	F(7:9, 13:15) = -eye(3) * dt;
-	P = F * P * F' + Q;
+	measurement_flags = zeros(3, 1);
+	gnss_measurement = zeros(7, 1);
+	depth_measurement = 0;
+	dvl_measurement = zeros(3, 1);
 
 	if measurement_ptr <= n_measurements && measurement_indices(measurement_ptr) == i
-		k = measurement_ptr;
-		ti = measurement_time(k);
-		if ti <= T_cal
-			Cbn_est = quat_to_Cbn(q_est);
-			yaw_est = atan2(Cbn_est(2, 1), Cbn_est(1, 1));
-			yaw_residual = atan2(sin(Z_gps_yaw(k) - yaw_est), cos(Z_gps_yaw(k) - yaw_est));
-			residual = [Z_gps_pos(k, :)' - pos_est; Z_gps_vel(k, :)' - vel_est; yaw_residual];
-			H = zeros(7, 19);
-			H(1:3, 1:3) = eye(3);
-			H(4:6, 4:6) = eye(3);
-			H(7, 9) = 1;
-			R = diag([sigma_gps_pos^2*ones(1, 3), sigma_gps_vel^2*ones(1, 3), sigma_gps_yaw^2]);
-			[dx, P, accepted] = kf_update(P, H, residual, R, CHI2_7);
-			if accepted
-				[pos_est, vel_est, q_est, ba_est, bg_est, s_est, boresight_est, P] = ...
-					inject_error(dx, P, pos_est, vel_est, q_est, ba_est, bg_est, s_est, boresight_est);
-			end
+		measurement_idx = measurement_ptr;
+		if measurement_time(measurement_idx) <= T_cal
+			measurement_flags(1) = 1;
+			gnss_measurement = [Z_gps_pos(measurement_idx, :)'; ...
+				Z_gps_vel(measurement_idx, :)'; Z_gps_yaw(measurement_idx)];
 		end
-
-		H_depth = zeros(1, 19);
-		H_depth(3) = 1;
-		[dx, P, accepted] = kf_update(P, H_depth, Z_depth(k) - pos_est(3), sigma_depth^2, 6.63);
-		if accepted
-			[pos_est, vel_est, q_est, ba_est, bg_est, s_est, boresight_est, P] = ...
-				inject_error(dx, P, pos_est, vel_est, q_est, ba_est, bg_est, s_est, boresight_est);
-		end
-
-		if dvl_valid(k)
-			Cbn_est = quat_to_Cbn(q_est);
-			Cnb_est = Cbn_est';
-			velocity_body_est = Cnb_est * vel_est;
-			velocity_lever_est = velocity_body_est + cross(w_clean, lever_arm);
-			Cbs_est = eye(3) - skew_mat(boresight_est);
-			dvl_residual = Z_dvl(k, :)' - (1 + s_est) * Cbs_est * velocity_lever_est;
-
-			H_dvl = zeros(3, 19);
-			H_dvl(:, 4:6) = (1 + s_est) * Cbs_est * Cnb_est;
-			H_dvl(:, 7:9) = (1 + s_est) * Cbs_est * skew_mat(velocity_body_est);
-			H_dvl(:, 13:15) = (1 + s_est) * Cbs_est * skew_mat(lever_arm);
-			H_dvl(:, 16) = Cbs_est * velocity_lever_est;
-			H_dvl(:, 17:19) = (1 + s_est) * skew_mat(velocity_lever_est);
-			sigma_ping = sigma_dvl(norm(velocity_lever_est));
-			[dx, P, accepted] = kf_update(P, H_dvl, dvl_residual, sigma_ping^2 * eye(3), CHI2_3);
-			if accepted
-				[pos_est, vel_est, q_est, ba_est, bg_est, s_est, boresight_est, P] = ...
-					inject_error(dx, P, pos_est, vel_est, q_est, ba_est, bg_est, s_est, boresight_est);
-				n_dvl_used = n_dvl_used + 1;
-			else
-				n_dvl_rejected = n_dvl_rejected + 1;
-			end
+		measurement_flags(2) = 1;
+		depth_measurement = Z_depth(measurement_idx);
+		if dvl_valid(measurement_idx)
+			measurement_flags(3) = 1;
+			dvl_measurement = Z_dvl(measurement_idx, :)';
 		end
 		measurement_ptr = measurement_ptr + 1;
 	end
 
-	Cbn_est = quat_to_Cbn(q_est);
-	position_est_history(i, :) = pos_est';
-	velocity_est_history(i, :) = vel_est';
+	[estimator_state, P, update_status, ~] = esekf19_step( ...
+		estimator_state, P, Q, gyro_meas(i, :)', accel_meas(i, :)', ...
+		gnss_measurement, depth_measurement, dvl_measurement, measurement_flags, filter_cfg);
+	if measurement_flags(3) ~= 0
+		if update_status(3) ~= 0
+			n_dvl_used = n_dvl_used + 1;
+		else
+			n_dvl_rejected = n_dvl_rejected + 1;
+		end
+	end
+
+	Cbn_est = quat_to_Cbn(estimator_state(7:10));
+	position_est_history(i, :) = estimator_state(1:3)';
+	velocity_est_history(i, :) = estimator_state(4:6)';
 	attitude_est_history(i, :) = [atan2(Cbn_est(3, 2), Cbn_est(3, 3)), ...
 		-asin(max(min(Cbn_est(3, 1), 1), -1)), atan2(Cbn_est(2, 1), Cbn_est(1, 1))];
-	parameter_history(i, :) = [s_est*100, boresight_est'*180/pi];
+	parameter_history(i, :) = [estimator_state(17)*100, estimator_state(18:20)'*180/pi];
 	parameter_sigma_history(i, :) = [sqrt(P(16, 16))*100, ...
 		sqrt(diag(P(17:19, 17:19)))'*180/pi];
 end
@@ -408,85 +360,20 @@ fprintf('IMU full-scale clipping samples gyro/accel: %d/%d\n', ...
 result = struct('time', time, 'position_true_ned', position_true, ...
 	'position_est_ned', position_est_history, 'velocity_true_ned', velocity_true_ned, ...
 	'velocity_est_ned', velocity_est_history, 'velocity_rmse_ned', velocity_rmse_ned, ...
+	'velocity_true_body', velocity_true_body, ...
 	'attitude_true_rpy', [roll_true, pitch_true, yaw_true], ...
 	'attitude_est_rpy', attitude_est_history, 'parameter_history', parameter_history, ...
 	'parameter_sigma_history', parameter_sigma_history, 'parameter_truth', parameter_truth, ...
 	'alpha_observability', alpha_observability, 'dvl_valid', dvl_valid, ...
 	'dvl_used', n_dvl_used, 'dvl_rejected', n_dvl_rejected, ...
-	'position_error_ned', position_error);
+	'position_error_ned', position_error, ...
+	'position_error_horizontal', position_error_horizontal, ...
+	'position_error_norm', position_error_norm, ...
+	'underwater_mask', underwater, 'calibration_end_s', T_cal, ...
+	'dive_index', idx_dive, 'destination_ned', destination);
 
 if make_plots
-	figure('Name', 'Roll-boresight: quy dao', 'Color', 'w', 'Position', [40 60 1350 620]);
-	subplot(1, 2, 1);
-	plot3(position_true(:, 2), position_true(:, 1), -position_true(:, 3), 'r-', 'LineWidth', 1.8); hold on; grid on;
-	plot3(position_est_history(:, 2), position_est_history(:, 1), -position_est_history(:, 3), 'k--', 'LineWidth', 1.3);
-	plot3(0, 0, 0, 'go', 'MarkerFaceColor', 'g');
-	plot3(position_true(idx_dive, 2), position_true(idx_dive, 1), -position_true(idx_dive, 3), ...
-		'm^', 'MarkerFaceColor', 'm');
-	plot3(destination(2), destination(1), -destination(3), 'bp', 'MarkerFaceColor', 'b');
-	xlabel('East (m)'); ylabel('North (m)'); zlabel('Up (m)');
-	title('Quy dao 3D'); legend('Truth', 'ES-EKF', 'Start', 'Dive', 'Goal', 'Location', 'best');
-	axis equal; view([-35 25]);
-
-	subplot(1, 2, 2);
-	plot(position_true(:, 2), position_true(:, 1), 'r-', 'LineWidth', 1.8); hold on; grid on;
-	plot(position_est_history(:, 2), position_est_history(:, 1), 'k--', 'LineWidth', 1.3);
-	xline(position_true(idx_dive, 2), 'm:', 'GNSS off');
-	xlabel('East (m)'); ylabel('North (m)'); title('Mặt bằng N-E');
-	legend('Truth', 'ES-EKF', 'Location', 'best'); axis equal;
-
-	figure('Name', 'Roll-boresight: thai do va kich thich', 'Color', 'w', 'Position', [80 40 1300 760]);
-	angles_true = [roll_true, pitch_true, unwrap(yaw_true)] * 180/pi;
-	angles_est = attitude_est_history;
-	angles_est(:, 3) = unwrap(angles_est(:, 3));
-	angle_names = {'Roll phi (deg)', 'Pitch theta (deg)', 'Yaw psi (deg)'};
-	for axis_idx = 1:3
-		subplot(3, 2, 2*axis_idx-1);
-		plot(time, angles_true(:, axis_idx), 'r-', 'LineWidth', 1.4); hold on; grid on;
-		plot(time, angles_est(:, axis_idx), 'k--', 'LineWidth', 1.1);
-		xline(T_cal, 'm--', 'GNSS off'); ylabel(angle_names{axis_idx});
-		legend('Truth', 'ES-EKF', 'Location', 'best');
-		subplot(3, 2, 2*axis_idx);
-		if axis_idx == 1
-			plot(time, velocity_true_body(:, 2), 'b-', 'LineWidth', 1.2); hold on;
-			plot(time, velocity_true_body(:, 3), 'Color', [0 0.6 0], 'LineWidth', 1.2);
-			ylabel('Body sway/heave (m/s)'); legend('v sway', 'w heave', 'Location', 'best');
-		elseif axis_idx == 2
-			plot(time, position_true(:, 3), 'r-', 'LineWidth', 1.3); hold on;
-			plot(time, position_est_history(:, 3), 'k--', 'LineWidth', 1.1);
-			ylabel('Depth down (m)'); legend('Truth', 'ES-EKF', 'Location', 'best');
-		else
-			plot(time(underwater), position_error_horizontal, 'b-', 'LineWidth', 1.2); hold on;
-			plot(time(underwater), position_error_norm, 'k--', 'LineWidth', 1.2);
-			ylabel('Position error (m)'); legend('Horizontal', '3D', 'Location', 'best');
-		end
-		grid on; xlabel('Time (s)'); xline(T_cal, 'm--');
-	end
-
-	figure('Name', 'Roll-boresight: hoi tu tham so', 'Color', 'w', 'Position', [120 60 1200 820]);
-	parameter_names = {'Scale s (%)', 'Alpha roll (deg)', 'Beta pitch (deg)', 'Gamma yaw (deg)'};
-	for parameter_idx = 1:4
-		subplot(4, 1, parameter_idx);
-		plot(time, parameter_history(:, parameter_idx), 'b-', 'LineWidth', 1.4); hold on; grid on;
-		plot(time, parameter_truth(parameter_idx) + 3*parameter_sigma_history(:, parameter_idx), 'k:');
-		plot(time, parameter_truth(parameter_idx) - 3*parameter_sigma_history(:, parameter_idx), 'k:');
-		yline(parameter_truth(parameter_idx), 'r--', 'Truth');
-		xline(T_cal, 'm--', 'GNSS off');
-		ylabel(parameter_names{parameter_idx});
-		if parameter_idx == 1, legend('ES-EKF', 'Truth +/- 3 sigma', 'Location', 'best'); end
-	end
-	xlabel('Time (s)');
-
-	figure('Name', 'Roll-boresight: van toc NED', 'Color', 'w', 'Position', [160 80 1100 720]);
-	ned_names = {'North v_N (m/s)', 'East v_E (m/s)', 'Down v_D (m/s)'};
-	for axis_idx = 1:3
-		subplot(3, 1, axis_idx);
-		plot(time, velocity_true_ned(:, axis_idx), 'r-', 'LineWidth', 1.4); hold on; grid on;
-		plot(time, velocity_est_history(:, axis_idx), 'k--', 'LineWidth', 1.1);
-		xline(T_cal, 'm--', 'GNSS off'); ylabel(ned_names{axis_idx});
-		legend('Truth', 'ES-EKF', 'Location', 'best');
-	end
-	xlabel('Time (s)');
+	roll_boresight_plot(result);
 end
 end
 
@@ -497,48 +384,6 @@ cy = cos(yaw); sy = sin(yaw);
 Cbn = [cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr; ...
 	sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr; ...
 	-sp, cp*sr, cp*cr];
-end
-
-function q = quat_from_euler(roll, pitch, yaw)
-cr = cos(roll/2); sr = sin(roll/2);
-cp = cos(pitch/2); sp = sin(pitch/2);
-cy = cos(yaw/2); sy = sin(yaw/2);
-q = [cy*cp*cr + sy*sp*sr; cy*cp*sr - sy*sp*cr; ...
-	cy*sp*cr + sy*cp*sr; sy*cp*cr - cy*sp*sr];
-q = q / norm(q);
-end
-
-function [dx, P, accepted] = kf_update(P, H, residual, R, gate)
-S = H * P * H' + R;
-nis = residual' * (S \ residual);
-accepted = isfinite(nis) && nis <= gate;
-dx = zeros(size(P, 1), 1);
-if ~accepted
-	return;
-end
-K = (P * H') / S;
-dx = K * residual;
-I_KH = eye(size(P)) - K * H;
-P = I_KH * P * I_KH' + K * R * K';
-P = 0.5 * (P + P');
-end
-
-function [pos, vel, q, ba, bg, scale, boresight, P] = inject_error(dx, P, pos, vel, q, ba, bg, scale, boresight)
-pos = pos + dx(1:3);
-vel = vel + dx(4:6);
-dtheta = dx(7:9);
-dq = [1; 0.5*dtheta];
-dq = dq / norm(dq);
-q = quat_multiply(q, dq);
-q = q / norm(q);
-ba = ba + dx(10:12);
-bg = bg + dx(13:15);
-scale = scale + dx(16);
-boresight = boresight + dx(17:19);
-G = eye(19);
-G(7:9, 7:9) = eye(3) - 0.5*skew_mat(dtheta);
-P = G * P * G';
-P = 0.5 * (P + P');
 end
 
 function obs = alpha_information(v_l, indices, measurement_time, calibration_end, sigma_fn, scale, boresight, valid)
@@ -582,11 +427,4 @@ w = q(1); x = q(2); y = q(3); z = q(4);
 Cbn = [1-2*(y*y+z*z), 2*(x*y-w*z), 2*(x*z+w*y); ...
 	2*(x*y+w*z), 1-2*(x*x+z*z), 2*(y*z-w*x); ...
 	2*(x*z-w*y), 2*(y*z+w*x), 1-2*(x*x+y*y)];
-end
-
-function r = quat_multiply(a, b)
-r = [a(1)*b(1)-a(2)*b(2)-a(3)*b(3)-a(4)*b(4); ...
-	a(1)*b(2)+a(2)*b(1)+a(3)*b(4)-a(4)*b(3); ...
-	a(1)*b(3)-a(2)*b(4)+a(3)*b(1)+a(4)*b(2); ...
-	a(1)*b(4)+a(2)*b(3)-a(3)*b(2)+a(4)*b(1)];
 end
