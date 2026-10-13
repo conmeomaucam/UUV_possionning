@@ -6,6 +6,8 @@ function [x, P, Q] = esekf19_init(initial_rpy, gravity, noise_cfg)
 % noise_cfg (8x1): [acc_vrw; gyro_arw; acc_bias_sigma; acc_bias_tau;
 %                   gyro_bias_rw; scale_rw; boresight_rw; dt].
 
+
+
 dt = noise_cfg(8);
 roll = initial_rpy(1);
 pitch = initial_rpy(2);

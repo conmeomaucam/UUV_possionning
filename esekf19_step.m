@@ -11,6 +11,10 @@ function [state, covariance, update_status, nis] = esekf19_step( ...
 % cfg (18x1): dt, gravity, w_ie_NED[3], RN, RM, tan(latitude), height,
 % lever_arm_body[3], DVL noise floor/slope, GPS pos/vel/yaw sigma, depth sigma.
 
+
+
+
+% viết code comment vào 
 dt = cfg(1);
 gravity = cfg(2);
 w_ie_ned = cfg(3:5);
