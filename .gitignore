@@ -4,6 +4,8 @@
 *.mex*
 # Large binary data files
 du_lieu_cam_bien_full.mat
+roll_boresight_results/
+*.mat
 *.mat.bak
 slprj/
 

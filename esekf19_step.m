@@ -2,19 +2,15 @@ function [state, covariance, update_status, nis] = esekf19_step( ...
     state, covariance, process_noise, gyro_meas, accel_meas, ...
     gnss_meas, depth_meas, dvl_meas, measurement_flags, cfg)
 %ESEKF19_STEP One fixed-size INS prediction and optional sensor updates.
-% Code-generation entry point: no plotting, RNG, variable-size data or I/O.
 % state (20x1): p[1:3], v[4:6], quaternion wxyz[7:10], ba[11:13],
 % bg[14:16], scale[17], boresight alpha/beta/gamma[18:20].
 % covariance/process_noise: fixed 19x19 error-state matrices.
 % measurement_flags: [GNSS_valid; depth_valid; DVL_valid], fixed 3x1.
 % gnss_meas (7x1): position NED, velocity NED, yaw (rad).
-% cfg (18x1): dt, gravity, w_ie_NED[3], RN, RM, tan(latitude), height,
-% lever_arm_body[3], DVL noise floor/slope, GPS pos/vel/yaw sigma, depth sigma.
+% cfg (19x1): dt, gravity, w_ie_NED[3], RN, RM, tan(latitude), height,
+% lever_arm_body[3], DVL noise floor/slope, GPS pos/vel/yaw sigma,
+% depth sigma, accel bias tau.
 
-
-
-
-% viết code comment vào 
 dt = cfg(1);
 gravity = cfg(2);
 w_ie_ned = cfg(3:5);
@@ -23,6 +19,7 @@ radius_m = cfg(7);
 tan_latitude = cfg(8);
 height = cfg(9);
 lever_arm = cfg(10:12);
+accel_bias_tau = cfg(19);
 
 position = state(1:3);
 velocity = state(4:6);
@@ -32,7 +29,6 @@ gyro_bias = state(14:16);
 scale = state(17);
 boresight = state(18:20);
 
-% INS mechanization prediction in the local NED frame.
 Cbn = quat_to_cbn(quaternion);
 Cnb = Cbn';
 accel_corrected = accel_meas - accel_bias;
@@ -41,8 +37,7 @@ w_en_ned = [velocity(2)/(radius_n + height); ...
     -velocity(1)/(radius_m + height); ...
     -velocity(2)*tan_latitude/(radius_n + height)];
 w_nb_body = gyro_corrected - Cnb*(w_ie_ned + w_en_ned);
-accel_ned = Cbn*accel_corrected + [0; 0; gravity] ...
-    - cross(2*w_ie_ned + w_en_ned, velocity);
+accel_ned = Cbn*accel_corrected + [0; 0; gravity] - cross(2*w_ie_ned + w_en_ned, velocity);
 velocity = velocity + accel_ned*dt;
 position = position + velocity*dt;
 
@@ -53,12 +48,17 @@ delta_quaternion = [cos(angle_norm/2); ...
 quaternion = quat_multiply(quaternion, delta_quaternion);
 quaternion = quaternion/norm(quaternion);
 
+phi_acc = exp(-dt / max(accel_bias_tau, eps));
+accel_bias = phi_acc * accel_bias;
+
 F = eye(19);
 F(1:3, 4:6) = eye(3)*dt;
 F(4:6, 7:9) = -Cbn*skew_mat(accel_corrected)*dt;
 F(4:6, 10:12) = -Cbn*dt;
 F(7:9, 7:9) = eye(3) - skew_mat(w_nb_body)*dt;
 F(7:9, 13:15) = -eye(3)*dt;
+F(10:12, 10:12) = phi_acc * eye(3);
+
 covariance = F*covariance*F' + process_noise;
 
 update_status = zeros(3, 1);
@@ -74,7 +74,10 @@ if measurement_flags(1) ~= 0
     H = zeros(7, 19);
     H(1:3, 1:3) = eye(3);
     H(4:6, 4:6) = eye(3);
-    H(7, 9) = 1;
+    roll_est = atan2(Cbn(3, 2), Cbn(3, 3));
+    pitch_est = -asin(max(min(Cbn(3, 1), 1), -1));
+    cosp = max(cos(pitch_est), 1e-6);
+    H(7, 7:9) = [0, sin(roll_est)/cosp, cos(roll_est)/cosp];
     R = diag([cfg(15)^2*ones(1, 3), cfg(16)^2*ones(1, 3), cfg(17)^2]);
     [delta_state, covariance, accepted, nis_value] = ...
         update_gnss(covariance, H, residual, R);

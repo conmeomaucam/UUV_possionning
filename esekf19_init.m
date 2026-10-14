@@ -35,7 +35,8 @@ P = diag([(0.02)^2 * ones(1, 3), ...
     (1.5*pi/180)^2 * ones(1, 3)]);
 
 Q = zeros(19, 19);
-Q(4:6, 4:6) = noise_cfg(1)^2 * dt * eye(3);
+Q(1:3, 1:3) = (0.01)^2 * dt * eye(3);            % Tránh co cụm vị trí %[cite: 6]
+Q(4:6, 4:6) = max(noise_cfg(1)^2, (0.05)^2) * dt * eye(3); % Tăng process noise vận tốc %[cite: 6
 Q(7:9, 7:9) = noise_cfg(2)^2 * dt * eye(3);
 Q(10:12, 10:12) = noise_cfg(3)^2 * (2*dt/noise_cfg(4)) * eye(3);
 Q(13:15, 13:15) = noise_cfg(5)^2 * dt * eye(3);
