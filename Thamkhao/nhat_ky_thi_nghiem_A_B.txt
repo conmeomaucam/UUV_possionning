@@ -1,0 +1,416 @@
+===================================================================
+  KỊCH BẢN TỔNG THỂ KIỂM ĐỊNH ĐỐI CHỨNG CẤU HÌNH A VÀ B (BÁO CÁO 1)
+  Thời gian bắt đầu: 2026-10-16 14:46:38
+===================================================================
+
+-------------------------------------------------------------------
+GIAI ĐOẠN 1: SMOKE TEST (M = 10 chu kỳ)
+-------------------------------------------------------------------
+1. Chạy Smoke Test Cấu hình A (M = 10)...
+===================================================================
+BẮT ĐẦU MÔ PHỎNG MONTE CARLO (M = 10 runs) - CẤU HÌNH [A]
+Chế độ: Cấu hình A (Baseline) - R_gyro_lever TẮT (cfg(20) = 0)
+===================================================================
+  -> Tiến độ Monte Carlo:     1 / 10 ( 10.0%) | Đã chạy:  0.0s | Còn lại: ~ 0.0s
+  -> Tiến độ Monte Carlo:    10 / 10 (100.0%) | Đã chạy:  7.6s | Còn lại: ~ 0.0s
+Hoàn thành mô phỏng trong 8.28 giây (0.14 phút)!
+
+===================================================================
+BÁO CÁO THỐNG KÊ CHI TIẾT (BƯỚC 4) - CẤU HÌNH [A] (M = 10)
+===================================================================
+MỤC 1 & 2: ANEES TOÀN HỆ VÀ ANEES BIÊN THEO NHÓM TRẠNG THÁI:
+  * ANEES Tổng thể      :  28.94 (Kỳ vọng = 19.00)
+    - Pha 1 (t <= 15s)  :  29.19
+    - Pha 2 (t > 15s)   :  28.68
+  * Dải tin cậy 95% ANEES: [15.37, 23.01] (Bậc tự do dof = 190)
+  * Tỷ lệ mốc nằm trong dải:  29.5%
+  * ANEES BIÊN 5 NHÓM TRẠNG THÁI (Lưu ý: Không bắt buộc cộng bằng ANEES tổng do cov chéo):
+    1. Vị trí 3D        :   2.42 / 3.00
+    2. Vận tốc 3D       :   3.63 / 3.00
+    3. Tư thế 3D        :   3.00 / 3.00
+    4. Bias IMU (6 biến):   6.24 / 6.00
+    5. Hiệu chuẩn DVL   :   4.18 / 4.00 (Pha 1 = 4.07, Pha 2 = 4.28)
+-------------------------------------------------------------------
+MỤC 3: CỔNG LỌC CHI-SQUARE, NIS VÀ SỐ LẦN TỪ CHỐI:
+  * GNSS  : Chấp nhận  98.7% | NIS trung bình =  7.08 (Kỳ vọng = 7.00)
+  * Depth : Chấp nhận  98.7% | NIS trung bình =  1.06 (Kỳ vọng = 1.00)
+  * DVL   : Chấp nhận  99.3% | NIS trung bình =  3.07 (Kỳ vọng = 3.00)
+  * DVL rejects/run     : Trung bình =  1.1 | Lớn nhất = 3
+  * GNSS rejects/run    : Trung bình =  1.0 | Lớn nhất = 2
+-------------------------------------------------------------------
+MỤC 4: ARMSE CUỐI VÀ TẠI CÁC MỐC THỜI GIAN:
+  * ARMSE Vị trí cuối (3D)           :   0.0235 m
+  * ARMSE Vận tốc cuối (3D)          :   0.0060 m/s
+  * ARMSE Tư thế cuối (3D)           :   0.0283 deg
+  * ARMSE Bias Gyro cuối (3D)        :  11.2850 deg/h
+  * ARMSE Scale factor DVL cuối      :   0.0429 %
+  * ARMSE Roll Boresight (alpha) cuối:   0.2855 deg
+  * ARMSE Pitch Boresight (beta) cuối:   0.0328 deg
+  * ARMSE Yaw Boresight (gamma) cuối :   0.0283 deg
+  * ARMSE Vị trí 3D tại các mốc thời gian:
+    t (giây)  :      5.0     10.0     15.0     20.0     25.0     30.0 
+    ARMSE (m) :   0.0102   0.0089   0.0090   0.0166   0.0227   0.0235 
+-------------------------------------------------------------------
+MỤC 5: PHÂN PHỐI SAI SỐ VỊ TRÍ CUỐI CỦA TỪNG RUN:
+  * Trung vị (Median)   :   0.0189 m
+  * Phân vị 95 (P95)    :   0.0352 m
+  * Lớn nhất (Max)      :   0.0352 m (Run #9)
+  * Số run vượt 1.0 m   : 0 / 10
+-------------------------------------------------------------------
+MỤC 6: TRUNG BÌNH +- 1.96*s/sqrt(M) CỦA ANEES THEO RUN:
+  * ANEES Toàn hệ (Cả run)  :  1.52 +-  0.12 (95% CI: [1.41, 1.64])
+  * ANEES Toàn hệ (Pha 1)   :  1.54 +-  0.13 (95% CI: [1.41, 1.67])
+  * ANEES Toàn hệ (Pha 2)   :  1.51 +-  0.22 (95% CI: [1.29, 1.73])
+  * ANEES Hiệu chuẩn (Cả run):  1.04 +-  0.30 (95% CI: [0.74, 1.34])
+  * ANEES Hiệu chuẩn (Pha 1):  1.02 +-  0.26 (95% CI: [0.76, 1.27])
+  * ANEES Hiệu chuẩn (Pha 2):  1.07 +-  0.44 (95% CI: [0.63, 1.50])
+-------------------------------------------------------------------
+MỤC 7: BỐC TÁCH 4 BIẾN HIỆU CHUẨN THEO PHA:
+Biến               | Pha 1 (Có GNSS)  | Pha 2 (Mất GNSS) | Tỷ số (ARMSE/sig)^2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+-------------------------------------------------------------------
+Scale factor       | 0.1997 -> 0.2119 %   | 0.0439 -> 0.0632 %   |  0.89 ->  0.48
+Roll Boresight     | 0.9253 -> 0.9269 deg | 0.3210 -> 0.2409 deg |  1.00 ->  1.78
+Pitch Boresight    | 0.1738 -> 0.1795 deg | 0.0423 -> 0.0370 deg |  0.94 ->  1.31
+Yaw Boresight      | 0.1168 -> 0.1405 deg | 0.0307 -> 0.0365 deg |  0.69 ->  0.71
+===================================================================
+
+Đã lưu dữ liệu kết quả vào file: C:\Users\Thinkpad\Desktop\BORESIGHT_ES_EKF\ket_qua_cauhinh_A_M10.mat
+  -> Cấu hình A (M = 10) chạy thành công!
+
+2. Chạy Smoke Test Cấu hình B (M = 10)...
+===================================================================
+BẮT ĐẦU MÔ PHỎNG MONTE CARLO (M = 10 runs) - CẤU HÌNH [B]
+Chế độ: Cấu hình B (E1) - R_gyro_lever BẬT (sigma_arw = 7.272e-06 rad/sqrt(s))
+===================================================================
+  -> Tiến độ Monte Carlo:     1 / 10 ( 10.0%) | Đã chạy:  0.0s | Còn lại: ~ 0.0s
+  -> Tiến độ Monte Carlo:    10 / 10 (100.0%) | Đã chạy:  7.1s | Còn lại: ~ 0.0s
+Hoàn thành mô phỏng trong 7.88 giây (0.13 phút)!
+
+===================================================================
+BÁO CÁO THỐNG KÊ CHI TIẾT (BƯỚC 4) - CẤU HÌNH [B] (M = 10)
+===================================================================
+MỤC 1 & 2: ANEES TOÀN HỆ VÀ ANEES BIÊN THEO NHÓM TRẠNG THÁI:
+  * ANEES Tổng thể      :  28.94 (Kỳ vọng = 19.00)
+    - Pha 1 (t <= 15s)  :  29.19
+    - Pha 2 (t > 15s)   :  28.68
+  * Dải tin cậy 95% ANEES: [15.37, 23.01] (Bậc tự do dof = 190)
+  * Tỷ lệ mốc nằm trong dải:  29.5%
+  * ANEES BIÊN 5 NHÓM TRẠNG THÁI (Lưu ý: Không bắt buộc cộng bằng ANEES tổng do cov chéo):
+    1. Vị trí 3D        :   2.42 / 3.00
+    2. Vận tốc 3D       :   3.63 / 3.00
+    3. Tư thế 3D        :   3.00 / 3.00
+    4. Bias IMU (6 biến):   6.24 / 6.00
+    5. Hiệu chuẩn DVL   :   4.17 / 4.00 (Pha 1 = 4.07, Pha 2 = 4.28)
+-------------------------------------------------------------------
+MỤC 3: CỔNG LỌC CHI-SQUARE, NIS VÀ SỐ LẦN TỪ CHỐI:
+  * GNSS  : Chấp nhận  98.7% | NIS trung bình =  7.08 (Kỳ vọng = 7.00)
+  * Depth : Chấp nhận  98.7% | NIS trung bình =  1.06 (Kỳ vọng = 1.00)
+  * DVL   : Chấp nhận  99.3% | NIS trung bình =  3.07 (Kỳ vọng = 3.00)
+  * DVL rejects/run     : Trung bình =  1.1 | Lớn nhất = 3
+  * GNSS rejects/run    : Trung bình =  1.0 | Lớn nhất = 2
+-------------------------------------------------------------------
+MỤC 4: ARMSE CUỐI VÀ TẠI CÁC MỐC THỜI GIAN:
+  * ARMSE Vị trí cuối (3D)           :   0.0235 m
+  * ARMSE Vận tốc cuối (3D)          :   0.0060 m/s
+  * ARMSE Tư thế cuối (3D)           :   0.0283 deg
+  * ARMSE Bias Gyro cuối (3D)        :  11.2850 deg/h
+  * ARMSE Scale factor DVL cuối      :   0.0429 %
+  * ARMSE Roll Boresight (alpha) cuối:   0.2855 deg
+  * ARMSE Pitch Boresight (beta) cuối:   0.0328 deg
+  * ARMSE Yaw Boresight (gamma) cuối :   0.0283 deg
+  * ARMSE Vị trí 3D tại các mốc thời gian:
+    t (giây)  :      5.0     10.0     15.0     20.0     25.0     30.0 
+    ARMSE (m) :   0.0102   0.0089   0.0090   0.0166   0.0227   0.0235 
+-------------------------------------------------------------------
+MỤC 5: PHÂN PHỐI SAI SỐ VỊ TRÍ CUỐI CỦA TỪNG RUN:
+  * Trung vị (Median)   :   0.0189 m
+  * Phân vị 95 (P95)    :   0.0352 m
+  * Lớn nhất (Max)      :   0.0352 m (Run #9)
+  * Số run vượt 1.0 m   : 0 / 10
+-------------------------------------------------------------------
+MỤC 6: TRUNG BÌNH +- 1.96*s/sqrt(M) CỦA ANEES THEO RUN:
+  * ANEES Toàn hệ (Cả run)  :  1.52 +-  0.12 (95% CI: [1.41, 1.64])
+  * ANEES Toàn hệ (Pha 1)   :  1.54 +-  0.13 (95% CI: [1.41, 1.67])
+  * ANEES Toàn hệ (Pha 2)   :  1.51 +-  0.22 (95% CI: [1.29, 1.73])
+  * ANEES Hiệu chuẩn (Cả run):  1.04 +-  0.30 (95% CI: [0.74, 1.34])
+  * ANEES Hiệu chuẩn (Pha 1):  1.02 +-  0.26 (95% CI: [0.76, 1.27])
+  * ANEES Hiệu chuẩn (Pha 2):  1.07 +-  0.44 (95% CI: [0.63, 1.50])
+-------------------------------------------------------------------
+MỤC 7: BỐC TÁCH 4 BIẾN HIỆU CHUẨN THEO PHA:
+Biến               | Pha 1 (Có GNSS)  | Pha 2 (Mất GNSS) | Tỷ số (ARMSE/sig)^2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+-------------------------------------------------------------------
+Scale factor       | 0.1997 -> 0.2119 %   | 0.0439 -> 0.0632 %   |  0.89 ->  0.48
+Roll Boresight     | 0.9253 -> 0.9269 deg | 0.3210 -> 0.2409 deg |  1.00 ->  1.78
+Pitch Boresight    | 0.1738 -> 0.1795 deg | 0.0423 -> 0.0370 deg |  0.94 ->  1.31
+Yaw Boresight      | 0.1168 -> 0.1405 deg | 0.0307 -> 0.0365 deg |  0.69 ->  0.71
+===================================================================
+
+Đã lưu dữ liệu kết quả vào file: C:\Users\Thinkpad\Desktop\BORESIGHT_ES_EKF\ket_qua_cauhinh_B_M10.mat
+  -> Cấu hình B (M = 10) chạy thành công!
+=> SMOKE TEST HOÀN TẤT THÀNH CÔNG! KHÔNG PHÁT HIỆN LỖI CODE.
+
+-------------------------------------------------------------------
+GIAI ĐOẠN 2: KIỂM ĐỊNH CHÍNH THỨC (M = 200 chu kỳ)
+-------------------------------------------------------------------
+1. Đang chạy Cấu hình A (Baseline - R_gyro_lever TẮT) với M = 200...
+===================================================================
+BẮT ĐẦU MÔ PHỎNG MONTE CARLO (M = 200 runs) - CẤU HÌNH [A]
+Chế độ: Cấu hình A (Baseline) - R_gyro_lever TẮT (cfg(20) = 0)
+===================================================================
+  -> Tiến độ Monte Carlo:     1 / 200 (  0.5%) | Đã chạy:  0.0s | Còn lại: ~ 0.0s
+  -> Tiến độ Monte Carlo:    10 / 200 (  5.0%) | Đã chạy:  7.1s | Còn lại: ~134.7s
+  -> Tiến độ Monte Carlo:    50 / 200 ( 25.0%) | Đã chạy: 56.7s | Còn lại: ~170.2s
+  -> Tiến độ Monte Carlo:   100 / 200 ( 50.0%) | Đã chạy: 106.1s | Còn lại: ~106.1s
+  -> Tiến độ Monte Carlo:   150 / 200 ( 75.0%) | Đã chạy: 159.6s | Còn lại: ~53.2s
+  -> Tiến độ Monte Carlo:   200 / 200 (100.0%) | Đã chạy: 228.9s | Còn lại: ~ 0.0s
+Hoàn thành mô phỏng trong 230.23 giây (3.84 phút)!
+
+===================================================================
+BÁO CÁO THỐNG KÊ CHI TIẾT (BƯỚC 4) - CẤU HÌNH [A] (M = 200)
+===================================================================
+MỤC 1 & 2: ANEES TOÀN HỆ VÀ ANEES BIÊN THEO NHÓM TRẠNG THÁI:
+  * ANEES Tổng thể      :  30.83 (Kỳ vọng = 19.00)
+    - Pha 1 (t <= 15s)  :  30.23
+    - Pha 2 (t > 15s)   :  31.43
+  * Dải tin cậy 95% ANEES: [18.16, 19.86] (Bậc tự do dof = 3800)
+  * Tỷ lệ mốc nằm trong dải:   3.4%
+  * ANEES BIÊN 5 NHÓM TRẠNG THÁI (Lưu ý: Không bắt buộc cộng bằng ANEES tổng do cov chéo):
+    1. Vị trí 3D        :   3.35 / 3.00
+    2. Vận tốc 3D       :   3.85 / 3.00
+    3. Tư thế 3D        :   3.60 / 3.00
+    4. Bias IMU (6 biến):   6.80 / 6.00
+    5. Hiệu chuẩn DVL   :   4.49 / 4.00 (Pha 1 = 4.34, Pha 2 = 4.65)
+-------------------------------------------------------------------
+MỤC 3: CỔNG LỌC CHI-SQUARE, NIS VÀ SỐ LẦN TỪ CHỐI:
+  * GNSS  : Chấp nhận  98.9% | NIS trung bình =  7.03 (Kỳ vọng = 7.00)
+  * Depth : Chấp nhận  99.0% | NIS trung bình =  0.99 (Kỳ vọng = 1.00)
+  * DVL   : Chấp nhận  98.8% | NIS trung bình =  3.08 (Kỳ vọng = 3.00)
+  * DVL rejects/run     : Trung bình =  1.8 | Lớn nhất = 6
+  * GNSS rejects/run    : Trung bình =  0.8 | Lớn nhất = 4
+-------------------------------------------------------------------
+MỤC 4: ARMSE CUỐI VÀ TẠI CÁC MỐC THỜI GIAN:
+  * ARMSE Vị trí cuối (3D)           :   0.0347 m
+  * ARMSE Vận tốc cuối (3D)          :   0.0053 m/s
+  * ARMSE Tư thế cuối (3D)           :   0.0410 deg
+  * ARMSE Bias Gyro cuối (3D)        :  12.4351 deg/h
+  * ARMSE Scale factor DVL cuối      :   0.0668 %
+  * ARMSE Roll Boresight (alpha) cuối:   0.1901 deg
+  * ARMSE Pitch Boresight (beta) cuối:   0.0384 deg
+  * ARMSE Yaw Boresight (gamma) cuối :   0.0385 deg
+  * ARMSE Vị trí 3D tại các mốc thời gian:
+    t (giây)  :      5.0     10.0     15.0     20.0     25.0     30.0 
+    ARMSE (m) :   0.0123   0.0116   0.0108   0.0202   0.0275   0.0347 
+-------------------------------------------------------------------
+MỤC 5: PHÂN PHỐI SAI SỐ VỊ TRÍ CUỐI CỦA TỪNG RUN:
+  * Trung vị (Median)   :   0.0293 m
+  * Phân vị 95 (P95)    :   0.0602 m
+  * Lớn nhất (Max)      :   0.0903 m (Run #45)
+  * Số run vượt 1.0 m   : 0 / 200
+-------------------------------------------------------------------
+MỤC 6: TRUNG BÌNH +- 1.96*s/sqrt(M) CỦA ANEES THEO RUN:
+  * ANEES Toàn hệ (Cả run)  :  1.62 +-  0.04 (95% CI: [1.59, 1.66])
+  * ANEES Toàn hệ (Pha 1)   :  1.59 +-  0.04 (95% CI: [1.55, 1.63])
+  * ANEES Toàn hệ (Pha 2)   :  1.65 +-  0.05 (95% CI: [1.61, 1.70])
+  * ANEES Hiệu chuẩn (Cả run):  1.12 +-  0.07 (95% CI: [1.05, 1.20])
+  * ANEES Hiệu chuẩn (Pha 1):  1.08 +-  0.07 (95% CI: [1.02, 1.15])
+  * ANEES Hiệu chuẩn (Pha 2):  1.16 +-  0.10 (95% CI: [1.06, 1.26])
+-------------------------------------------------------------------
+MỤC 7: BỐC TÁCH 4 BIẾN HIỆU CHUẨN THEO PHA:
+Biến               | Pha 1 (Có GNSS)  | Pha 2 (Mất GNSS) | Tỷ số (ARMSE/sig)^2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+-------------------------------------------------------------------
+Scale factor       | 0.2250 -> 0.2130 %   | 0.0686 -> 0.0632 %   |  1.12 ->  1.18
+Roll Boresight     | 0.9214 -> 0.9258 deg | 0.2421 -> 0.2411 deg |  0.99 ->  1.01
+Pitch Boresight    | 0.1872 -> 0.1796 deg | 0.0430 -> 0.0370 deg |  1.09 ->  1.35
+Yaw Boresight      | 0.1396 -> 0.1412 deg | 0.0392 -> 0.0365 deg |  0.98 ->  1.16
+===================================================================
+
+Đang vẽ và xuất đồ thị PNG 200 dpi theo yêu cầu BƯỚC 5...
+  -> Đã lưu 4 đồ thị PNG 200 dpi thành công!
+Đã lưu dữ liệu kết quả vào file: C:\Users\Thinkpad\Desktop\BORESIGHT_ES_EKF\ket_qua_cauhinh_A_M200.mat
+  -> Cấu hình A hoàn tất sau 275.80 giây (4.60 phút)!
+
+2. Đang chạy Cấu hình B (E1 - R_gyro_lever BẬT) với M = 200...
+===================================================================
+BẮT ĐẦU MÔ PHỎNG MONTE CARLO (M = 200 runs) - CẤU HÌNH [B]
+Chế độ: Cấu hình B (E1) - R_gyro_lever BẬT (sigma_arw = 7.272e-06 rad/sqrt(s))
+===================================================================
+  -> Tiến độ Monte Carlo:     1 / 200 (  0.5%) | Đã chạy:  0.0s | Còn lại: ~ 0.2s
+  -> Tiến độ Monte Carlo:    10 / 200 (  5.0%) | Đã chạy: 13.5s | Còn lại: ~257.1s
+{Operation terminated by user during <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('test2', 'C:\Users\Thinkpad\Desktop\BORESIGHT_ES_EKF\test2.m', 379)" style="font-weight:bold">test2</a> (<a href="matlab: opentoline('C:\Users\Thinkpad\Desktop\BORESIGHT_ES_EKF\test2.m',379,0)">line 379</a>)
+
+
+In <a href="matlab:matlab.lang.internal.introspective.errorDocCallback('chay_toan_bo_thi_nghiem', 'C:\Users\Thinkpad\Desktop\BORESIGHT_ES_EKF\chay_toan_bo_thi_nghiem.m', 46)" style="font-weight:bold">chay_toan_bo_thi_nghiem</a> (<a href="matlab: opentoline('C:\Users\Thinkpad\Desktop\BORESIGHT_ES_EKF\chay_toan_bo_thi_nghiem.m',46,0)">line 46</a>)
+res_B = test2('B', 200, true);
+        ^^^^^^^^^^^^^^^^^^^^^
+} 
+test2
+===================================================================
+BẮT ĐẦU MÔ PHỎNG MONTE CARLO (M = 200 runs) - CẤU HÌNH [B]
+Chế độ: Cấu hình B (E1) - R_gyro_lever BẬT (sigma_arw = 7.272e-06 rad/sqrt(s))
+===================================================================
+  -> Tiến độ Monte Carlo:     1 / 200 (  0.5%) | Đã chạy:  0.0s | Còn lại: ~ 0.0s
+  -> Tiến độ Monte Carlo:    10 / 200 (  5.0%) | Đã chạy:  8.6s | Còn lại: ~163.9s
+  -> Tiến độ Monte Carlo:    50 / 200 ( 25.0%) | Đã chạy: 44.7s | Còn lại: ~134.2s
+  -> Tiến độ Monte Carlo:   100 / 200 ( 50.0%) | Đã chạy: 91.0s | Còn lại: ~91.0s
+  -> Tiến độ Monte Carlo:   150 / 200 ( 75.0%) | Đã chạy: 138.6s | Còn lại: ~46.2s
+  -> Tiến độ Monte Carlo:   200 / 200 (100.0%) | Đã chạy: 188.9s | Còn lại: ~ 0.0s
+Hoàn thành mô phỏng trong 189.97 giây (3.17 phút)!
+
+===================================================================
+BÁO CÁO THỐNG KÊ CHI TIẾT (BƯỚC 4) - CẤU HÌNH [B] (M = 200)
+===================================================================
+MỤC 1 & 2: ANEES TOÀN HỆ VÀ ANEES BIÊN THEO NHÓM TRẠNG THÁI:
+  * ANEES Tổng thể      :  30.83 (Kỳ vọng = 19.00)
+    - Pha 1 (t <= 15s)  :  30.23
+    - Pha 2 (t > 15s)   :  31.43
+  * Dải tin cậy 95% ANEES: [18.16, 19.86] (Bậc tự do dof = 3800)
+  * Tỷ lệ mốc nằm trong dải:   3.4%
+  * ANEES BIÊN 5 NHÓM TRẠNG THÁI (Lưu ý: Không bắt buộc cộng bằng ANEES tổng do cov chéo):
+    1. Vị trí 3D        :   3.35 / 3.00
+    2. Vận tốc 3D       :   3.85 / 3.00
+    3. Tư thế 3D        :   3.60 / 3.00
+    4. Bias IMU (6 biến):   6.80 / 6.00
+    5. Hiệu chuẩn DVL   :   4.49 / 4.00 (Pha 1 = 4.34, Pha 2 = 4.65)
+-------------------------------------------------------------------
+MỤC 3: CỔNG LỌC CHI-SQUARE, NIS VÀ SỐ LẦN TỪ CHỐI:
+  * GNSS  : Chấp nhận  98.9% | NIS trung bình =  7.03 (Kỳ vọng = 7.00)
+  * Depth : Chấp nhận  99.0% | NIS trung bình =  0.99 (Kỳ vọng = 1.00)
+  * DVL   : Chấp nhận  98.8% | NIS trung bình =  3.08 (Kỳ vọng = 3.00)
+  * DVL rejects/run     : Trung bình =  1.8 | Lớn nhất = 6
+  * GNSS rejects/run    : Trung bình =  0.8 | Lớn nhất = 4
+-------------------------------------------------------------------
+MỤC 4: ARMSE CUỐI VÀ TẠI CÁC MỐC THỜI GIAN:
+  * ARMSE Vị trí cuối (3D)           :   0.0347 m
+  * ARMSE Vận tốc cuối (3D)          :   0.0053 m/s
+  * ARMSE Tư thế cuối (3D)           :   0.0410 deg
+  * ARMSE Bias Gyro cuối (3D)        :  12.4350 deg/h
+  * ARMSE Scale factor DVL cuối      :   0.0668 %
+  * ARMSE Roll Boresight (alpha) cuối:   0.1901 deg
+  * ARMSE Pitch Boresight (beta) cuối:   0.0384 deg
+  * ARMSE Yaw Boresight (gamma) cuối :   0.0385 deg
+  * ARMSE Vị trí 3D tại các mốc thời gian:
+    t (giây)  :      5.0     10.0     15.0     20.0     25.0     30.0 
+    ARMSE (m) :   0.0123   0.0116   0.0108   0.0202   0.0275   0.0347 
+-------------------------------------------------------------------
+MỤC 5: PHÂN PHỐI SAI SỐ VỊ TRÍ CUỐI CỦA TỪNG RUN:
+  * Trung vị (Median)   :   0.0293 m
+  * Phân vị 95 (P95)    :   0.0602 m
+  * Lớn nhất (Max)      :   0.0903 m (Run #45)
+  * Số run vượt 1.0 m   : 0 / 200
+-------------------------------------------------------------------
+MỤC 6: TRUNG BÌNH +- 1.96*s/sqrt(M) CỦA ANEES THEO RUN:
+  * ANEES Toàn hệ (Cả run)  :  1.62 +-  0.04 (95% CI: [1.59, 1.66])
+  * ANEES Toàn hệ (Pha 1)   :  1.59 +-  0.04 (95% CI: [1.55, 1.63])
+  * ANEES Toàn hệ (Pha 2)   :  1.65 +-  0.05 (95% CI: [1.61, 1.70])
+  * ANEES Hiệu chuẩn (Cả run):  1.12 +-  0.07 (95% CI: [1.05, 1.20])
+  * ANEES Hiệu chuẩn (Pha 1):  1.08 +-  0.07 (95% CI: [1.02, 1.15])
+  * ANEES Hiệu chuẩn (Pha 2):  1.16 +-  0.10 (95% CI: [1.06, 1.26])
+-------------------------------------------------------------------
+MỤC 7: BỐC TÁCH 4 BIẾN HIỆU CHUẨN THEO PHA:
+Biến               | Pha 1 (Có GNSS)  | Pha 2 (Mất GNSS) | Tỷ số (ARMSE/sig)^2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+                   | ARMSE -> sigma   | ARMSE -> sigma   | Pha 1 -> Pha 2
+-------------------------------------------------------------------
+Scale factor       | 0.2250 -> 0.2130 %   | 0.0686 -> 0.0632 %   |  1.12 ->  1.18
+Roll Boresight     | 0.9214 -> 0.9258 deg | 0.2421 -> 0.2411 deg |  0.99 ->  1.01
+Pitch Boresight    | 0.1872 -> 0.1796 deg | 0.0430 -> 0.0370 deg |  1.09 ->  1.35
+Yaw Boresight      | 0.1396 -> 0.1412 deg | 0.0392 -> 0.0365 deg |  0.98 ->  1.16
+===================================================================
+
+Đang vẽ và xuất đồ thị PNG 200 dpi theo yêu cầu BƯỚC 5...
+  -> Đã lưu 4 đồ thị PNG 200 dpi thành công!
+Đã lưu dữ liệu kết quả vào file: C:\Users\Thinkpad\Desktop\BORESIGHT_ES_EKF\ket_qua_cauhinh_B_M200.mat
+
+ans = 
+
+  <a href="matlab:helpPopup('struct')" style="font-weight:bold">struct</a> with fields:
+
+         config_type: 'B'
+              M_runs: 200
+           time_eval: [12000×1 double]
+               anees: [18.7802 18.9792 18.9433 19.0036 18.8196 18.8883 … ] (1×12000 double)
+           anees_pos: [3.0034 3.0030 3.0027 3.0023 3.0020 3.0017 3.0013 … ] (1×12000 double)
+           anees_vel: [3.0117 3.0138 3.0157 3.0176 3.0196 3.0215 3.0236 … ] (1×12000 double)
+           anees_att: [2.9262 2.9262 2.9262 2.9262 2.9262 2.9262 2.9262 … ] (1×12000 double)
+          anees_bias: [5.8827 6.0816 6.0457 6.1061 5.9221 5.9908 6.0719 … ] (1×12000 double)
+           anees_cal: [3.9578 3.9578 3.9578 3.9578 3.9578 3.9578 3.9578 … ] (1×12000 double)
+               armse: [12000×19 double]
+          mean_sigma: [12000×19 double]
+                  r1: 18.1552
+                  r2: 19.8638
+      pct_anees_pass: 3.4167
+       run_anees_tot: [200×1 double]
+    run_anees_tot_p1: [200×1 double]
+    run_anees_tot_p2: [200×1 double]
+       run_anees_cal: [200×1 double]
+    run_anees_cal_p1: [200×1 double]
+    run_anees_cal_p2: [200×1 double]
+       final_pos_err: [200×1 double]
+             rej_dvl: [200×1 double]
+            rej_gnss: [200×1 double]
+      gate_pass_rate: [3×1 double]
+            mean_nis: [3×1 double]
+       pos_armse_chk: [6×1 double]
+
+test2
+Đang thực thi 200 kịch bản Monte Carlo [Chế độ: CONSISTENCY]...
+  -> Tiến độ Monte Carlo:     1 / 200 (  0.5%) | Đã chạy:  0.0s | Còn lại: ~ 0.2s
+  -> Tiến độ Monte Carlo:    10 / 200 (  5.0%) | Đã chạy:  9.0s | Còn lại: ~171.7s
+  -> Tiến độ Monte Carlo:    50 / 200 ( 25.0%) | Đã chạy: 56.9s | Còn lại: ~170.7s
+  -> Tiến độ Monte Carlo:   100 / 200 ( 50.0%) | Đã chạy: 127.7s | Còn lại: ~127.7s
+  -> Tiến độ Monte Carlo:   150 / 200 ( 75.0%) | Đã chạy: 175.7s | Còn lại: ~58.6s
+  -> Tiến độ Monte Carlo:   200 / 200 (100.0%) | Đã chạy: 234.1s | Còn lại: ~ 0.0s
+Hoàn thành xong trong 235.11 giây (3.92 phút)!
+RMS pos         0.0166   0.0132   0.0127   0.0130   0.0207   0.0396   0.0602   0.0850
+median pos      0.0144   0.0114   0.0112   0.0109   0.0180   0.0350   0.0516   0.0720
+max pos         0.0400   0.0252   0.0270   0.0274   0.0506   0.0783   0.1333   0.2124
+sigma_p         0.0163   0.0134   0.0130   0.0128   0.0200   0.0379   0.0575   0.0806
+RMS vel         0.0229   0.0179   0.0180   0.0180   0.0225   0.0232   0.0220   0.0235
+RMS att deg     0.2741   0.1430   0.1581   0.1553   0.1636   0.2031   0.2300   0.2787
+DVL rejects/run: mean 1.6, max 6
+
+================== KẾT QUẢ KIỂM ĐỊNH MONTE CARLO ==================
+Chế độ kiểm định                  : [CONSISTENCY]
+Mục tiêu kiểm định                : Tính nhất quán Kalman (Consistency Test)
+Khởi tạo Scale & Boresight        : Phân bố chuẩn quanh giá trị thật (+ delta_x0)
+Số chu kỳ mô phỏng (M)            : 200
+Số biến trạng thái sai số (n_x)   : 19
+Giá trị lý tưởng của ANEES        : 19.00
+Dải chấp nhận tin cậy 95% ANEES   : [18.16, 19.86]
+Chỉ số ANEES trung bình tổng thể  : 19.74
+  * Pha 1 (t <= 15s, có GNSS)     : 19.83
+  * Pha 2 (t > 15s, mất GNSS)     : 19.65
+Tỉ lệ bước nằm trong ngưỡng 95%   : 59.8%
+ĐÁNH GIÁ TÍNH NHẤT QUÁN (CONSISTENCY): [CẦN TINH CHỈNH MA TRẬN Q/P]
+-------------------------------------------------------------------
+ANEES BIÊN THEO TỪNG NHÓM TRẠNG THÁI (MARGINAL ANEES - LÝ TƯỞNG = BẬC TỰ DO):
+  (Lưu ý: Do hiệp phương sai chéo P_ij ~= 0, tổng ANEES biên không nhất thiết bằng ANEES toàn hệ thống)
+  1. Vị trí 3D        :   3.18 / 3.00
+  2. Vận tốc 3D       :   3.06 / 3.00
+  3. Tư thế 3D        :   3.05 / 3.00
+  4. Bias IMU (6 biến):   6.12 / 6.00
+  5. Hiệu chuẩn DVL   :   4.44 / 4.00 (Scale & Boresight)
+-------------------------------------------------------------------
+CHẤT LƯỢNG CỔNG LỌC CHI-SQUARE & NIS CẢM BIẾN NGOÀI:
+  * GNSS  : Chấp nhận  98.9% | NIS =  7.01 (Kỳ vọng = 7.00)
+  * Depth : Chấp nhận  99.0% | NIS =  1.00 (Kỳ vọng = 1.00)
+  * DVL   : Chấp nhận  98.9% | NIS =  3.02 (Kỳ vọng = 3.00)
+-------------------------------------------------------------------
+ARMSE Vị trí cuối (3D)            : 0.0850 m
+ARMSE Vận tốc cuối (3D)           : 0.0235 m/s
+ARMSE Scale factor DVL cuối       : 0.14469% (Thực tế = 1.5%)
+ARMSE Góc Roll Boresight (alpha)  : 0.5706 deg
+ARMSE Góc Pitch Boresight (beta)  : 0.0932 deg
+ARMSE Góc Yaw Boresight (gamma)   : 0.0919 deg
+
+[THÀNH CÔNG] Đã tự động lưu kết quả E1 vào file: ket_qua_E1_gyro_lever.mat

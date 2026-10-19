@@ -1,0 +1,18 @@
+========================================================================================
+  BÁO CÁO KẾT QUẢ BỘ TEST 1: JACOBIAN VÀ RESET COVARIANCE (ES-EKF 19 TRẠNG THÁI)
+========================================================================================
+
+| ID    | Test                         | Metric                 | Threshold      | Actual             | PASS/FAIL |
+|-----------------------------------------------------------------------------------------------------------|
+| B1-1  | H_dvl Active Cols Rel Err    | Max relative error     | <= 1.00e-05    | 9.51e-08 (col 5)   | PASS      |
+| B1-2  | H_dvl Inactive Cols Abs Err  | Max absolute error     | <= 1.00e-08    | 0.00e+00 (col 0)   | PASS      |
+| B2-1  | G_theta Số học vs Jr(delta_th) | Max absolute error     | <= 1.00e-06    | 2.41e-11           | PASS      |
+| B2-2  | G_theta Code vs Jr (mag<=1e-3) | Max absolute error     | <= 1.00e-06    | 1.11e-07           | PASS      |
+| B2-3  | G_theta Code vs Jr (mag<=1e-2) | Max absolute error     | <= 1.00e-04    | 1.11e-05           | PASS      |
+| B3-1  | G_bs Số học vs Jr(-delta_bs) | Max absolute error     | <= 1.00e-06    | 2.41e-11           | PASS      |
+| B3-2  | G_bs Xác nhận DẤU CỘNG (+)   | Diff Plus vs Diff Minus | Diff(+) < Diff(-) | Plus=1.11e-05 vs Minus=5.78e-03 | PASS      |
+| B4-1  | Kích thước Covariance P      | Matrix Size            | 19x19          | 19x19              | PASS      |
+| B4-2  | Sai số đối xứng Frobenius    | norm(P-P')/norm(P)     | <= 1.00e-12    | 0.00e+00           | PASS      |
+| B4-3  | Trị riêng nhỏ nhất min(eig)  | min(eig(P))            | >= -1.00e-12   | 1.00e-02           | PASS      |
+| B4-4  | Khớp trực tiếp G * P * G'    | Frobenius Diff         | <= 1.00e-12    | 0.00e+00           | PASS      |
+========================================================================================

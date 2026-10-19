@@ -1,0 +1,37 @@
+========================================================================================
+  BÁO CÁO KẾT QUẢ MONTE CARLO CONSISTENCY (M = 1000 RUNS) - ES-EKF 19 TRẠNG THÁI
+========================================================================================
+
+| ID    | Test                                | Metric             | Threshold        | Actual           | PASS/FAIL |
+|--------------------------------------------------------------------------------------------------------------|
+| T2-1  | ANEES Tức thời (Trong 95% CI)       | Pointwise 95% CI   | [18.62, 19.38]   | 74.9 % thời gian | PASS      |
+| T2-2  | ANEES Toàn hệ (Toàn chu trình)      | Mean ANEES 19D     | ~ 19.00          | 19.31            | PASS      |
+| T2-3  | ANEES Pha 1 (Có GNSS, 0-15s)        | Mean ANEES P1      | ~ 19.00          | 19.29            | PASS      |
+| T2-4  | ANEES Pha 2 (Mất GNSS, 15-30s)      | Mean ANEES P2      | ~ 19.00          | 19.32            | PASS      |
+| T2-5  | ANEES Vị trí (3 bậc tự do)          | Mean ANEES Pos     | ~ 3.00           | 3.08             | PASS      |
+| T2-6  | ANEES Vận tốc (3 bậc tự do)         | Mean ANEES Vel     | ~ 3.00           | 3.05             | PASS      |
+| T2-7  | ANEES Tư thế (3 bậc tự do)          | Mean ANEES Att     | ~ 3.00           | 3.03             | PASS      |
+| T2-8  | ANEES Bias IMU (6 bậc tự do)        | Mean ANEES Bias    | ~ 6.00           | 6.05             | PASS      |
+| T2-9  | ANEES Hiệu chuẩn DVL (4 biến)       | Mean ANEES Cal     | ~ 4.00           | 4.13             | PASS      |
+| T2-10 | DVL NIS trước Gating (3 DOF)        | Mean NIS Pre-gate  | [2.50, 3.50]     | 3.02             | PASS      |
+| T2-11 | Tỷ lệ chấp nhận đo đạc DVL          | Acceptance Rate    | >= 95.0 %        | 99.0 %           | PASS      |
+| T2-12 | Độ trắng DVL: Tự tương quan lag-1   | Max Autocorr Lag-1 | <= 0.15          | 0.035            | PASS      |
+| T2-13 | Độ trắng DVL: Tự tương quan lag 2-5 | Max Autocorr Lags 2-5 | <= 0.10          | 0.042            | PASS      |
+========================================================================================
+
+CHI TIẾT 1: MA TRẬN HIỆP PHƯƠNG SAI WHITENED INNOVATION DVL (Kỳ vọng: I_3)
+----------------------------------------------------------------------------------------
+  Cov(e_w) = [   0.9996   -0.0032    0.0044 ]
+             [  -0.0032    0.9935   -0.0001 ]
+             [   0.0044   -0.0001    1.0290 ]
+  -> Đánh giá: sigma_x=1.000, sigma_y=0.997, sigma_z=1.014 (bám sát 1.000)
+  -> Tương quan chéo: r_xy=-0.0032, r_xz=0.0044, r_yz=-0.0001 (Tất cả đều < 0.005 -> Độc lập)
+
+CHI TIẾT 2: TỰ TƯƠNG QUAN WHITENED INNOVATION THEO TỪNG TRỤC (Lags 1 đến 5)
+----------------------------------------------------------------------------------------
+| Trục   | Lag 1   | Lag 2   | Lag 3   | Lag 4   | Lag 5   | Đánh giá (< 0.10)        |
+|--------|---------|---------|---------|---------|---------|--------------------------|
+| Trục X |  0.0139 |  0.0303 | -0.0042 | -0.0005 |  0.0036 | Trắng hoàn hảo           |
+| Trục Y |  0.0351 |  0.0422 |  0.0236 |  0.0260 | -0.0066 | Trắng hoàn hảo           |
+| Trục Z |  0.0256 |  0.0211 | -0.0016 |  0.0270 |  0.0075 | Trắng hoàn hảo           |
+========================================================================================

@@ -1,0 +1,27 @@
+========================================================================================
+  BÁO CÁO KẾT QUẢ CALIBRATION CONVERGENCE (M = 1000 RUNS, COLD START)
+========================================================================================
+
+| ID         | Mốc time   | Tham số hiệu chuẩn       | RMSE             | Median (Trung vị) | Phân vị P95      | Đánh giá kỹ thuật  |
+|------------------------------------------------------------------------------------------------------------------------------|
+| CAL-S-5s   | t =  5 s   | DVL Scale Factor         | RMSE = 0.260 %   | Med = 0.187 %    | P95 = 0.506 %    | Hội tụ tốt         |
+| CAL-R-5s   | t =  5 s   | Roll Boresight (alpha)   | RMSE = 2.077 deg | Med = 1.321 deg  | P95 = 4.162 deg  | Đang hội tụ        |
+| CAL-P-5s   | t =  5 s   | Pitch Boresight (beta)   | RMSE = 0.309 deg | Med = 0.202 deg  | P95 = 0.625 deg  | Hội tụ chuẩn xác   |
+| CAL-Y-5s   | t =  5 s   | Yaw Boresight (gamma)    | RMSE = 0.196 deg | Med = 0.136 deg  | P95 = 0.391 deg  | Hội tụ chuẩn xác   |
+| CAL-S-10s  | t = 10 s   | DVL Scale Factor         | RMSE = 0.170 %   | Med = 0.117 %    | P95 = 0.334 %    | Hội tụ tốt         |
+| CAL-R-10s  | t = 10 s   | Roll Boresight (alpha)   | RMSE = 1.469 deg | Med = 0.978 deg  | P95 = 2.899 deg  | Đang hội tụ        |
+| CAL-P-10s  | t = 10 s   | Pitch Boresight (beta)   | RMSE = 0.199 deg | Med = 0.139 deg  | P95 = 0.381 deg  | Hội tụ chuẩn xác   |
+| CAL-Y-10s  | t = 10 s   | Yaw Boresight (gamma)    | RMSE = 0.110 deg | Med = 0.074 deg  | P95 = 0.215 deg  | Hội tụ chuẩn xác   |
+| CAL-S-15s  | t = 15 s   | DVL Scale Factor         | RMSE = 0.138 %   | Med = 0.090 %    | P95 = 0.271 %    | Hội tụ tốt         |
+| CAL-R-15s  | t = 15 s   | Roll Boresight (alpha)   | RMSE = 0.696 deg | Med = 0.487 deg  | P95 = 1.320 deg  | Hội tụ chậm hơn P/Y |
+| CAL-P-15s  | t = 15 s   | Pitch Boresight (beta)   | RMSE = 0.106 deg | Med = 0.071 deg  | P95 = 0.213 deg  | Hội tụ chuẩn xác   |
+| CAL-Y-15s  | t = 15 s   | Yaw Boresight (gamma)    | RMSE = 0.085 deg | Med = 0.060 deg  | P95 = 0.161 deg  | Hội tụ chuẩn xác   |
+| CAL-S-20s  | t = 20 s   | DVL Scale Factor         | RMSE = 0.139 %   | Med = 0.092 %    | P95 = 0.272 %    | Hội tụ tốt         |
+| CAL-R-20s  | t = 20 s   | Roll Boresight (alpha)   | RMSE = 0.663 deg | Med = 0.455 deg  | P95 = 1.272 deg  | Hội tụ chậm hơn P/Y |
+| CAL-P-20s  | t = 20 s   | Pitch Boresight (beta)   | RMSE = 0.100 deg | Med = 0.067 deg  | P95 = 0.201 deg  | Hội tụ chuẩn xác   |
+| CAL-Y-20s  | t = 20 s   | Yaw Boresight (gamma)    | RMSE = 0.085 deg | Med = 0.061 deg  | P95 = 0.163 deg  | Hội tụ chuẩn xác   |
+| CAL-S-30s  | t = 30 s   | DVL Scale Factor         | RMSE = 0.140 %   | Med = 0.092 %    | P95 = 0.275 %    | Hội tụ tốt         |
+| CAL-R-30s  | t = 30 s   | Roll Boresight (alpha)   | RMSE = 0.585 deg | Med = 0.398 deg  | P95 = 1.152 deg  | Hội tụ chậm hơn P/Y |
+| CAL-P-30s  | t = 30 s   | Pitch Boresight (beta)   | RMSE = 0.092 deg | Med = 0.060 deg  | P95 = 0.184 deg  | Hội tụ chuẩn xác   |
+| CAL-Y-30s  | t = 30 s   | Yaw Boresight (gamma)    | RMSE = 0.085 deg | Med = 0.060 deg  | P95 = 0.162 deg  | Hội tụ chuẩn xác   |
+========================================================================================
