@@ -108,321 +108,114 @@ outlier_injected_count = zeros(M_runs, 1);
 
 % Khởi tạo song song nếu có Parallel Computing Toolbox
 use_parfor = false;
+pool_workers = 1;
 try
     if ~isempty(ver('parallel'))
         pool = gcp('nocreate');
         if isempty(pool)
-            parpool('local');
+            pool = parpool('local');
         end
         use_parfor = true;
+        pool_workers = pool.NumWorkers;
     end
-catch
+catch ME
+    warning('Không thể khởi tạo parpool: %s. Chuyển sang chạy tuần tự đơn luồng.', ME.message);
     use_parfor = false;
 end
 
 if use_parfor
-    fprintf('Chế độ tính toán: Song song (parfor)\n');
+    fprintf('Chế độ tính toán: Song song đa nhân (%d workers)\n', pool_workers);
+    try
+        pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'algo')));
+        pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'Sensor')));
+        pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'dieukiendauvao')));
+        pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'AUV_simulation', 'MSS', 'GNC')));
+        pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'AUV_simulation', 'MSS', 'LIBRARY')));
+        pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'AUV_simulation', 'MSS', 'CRAFT', 'AUV')));
+        pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'AUV_simulation', 'MSS', 'CRAFT', 'AUV', 'models')));
+    catch
+    end
 else
     fprintf('Chế độ tính toán: Tuần tự đơn luồng\n');
 end
 t_mc_start = tic;
+clear progress_printer;
 
 
-%% VÒNG LẶP MONTE CARLO
-for m = 1:M_runs
-    t_run_start = tic;
-    rng(2026 + m * 7, 'twister'); % Mầm số ngẫu nhiên độc lập
+%% VÒNG LẶP MONTE CARLO (HỖ TRỢ PARFOR ĐA NHÂN)
+sim_results(M_runs) = struct();
 
-    % 1. Ngẫu nhiên hóa Boresight & Scale thật của run m
-    true_bs_deg = [ ...
-        -3.0 + 6.0 * rand(); ...   % Roll [-3, +3] deg
-        -3.0 + 6.0 * rand(); ...   % Pitch [-3, +3] deg
-        -5.0 + 10.0 * rand()];     % Yaw [-5, +5] deg
-    true_bs_rad = deg2rad(true_bs_deg);
-    true_scale_val = -0.03 + 0.06 * rand(); % Scale [-3%, +3%]
+if use_parfor
+    q = parallel.pool.DataQueue;
+    afterEach(q, @(data) progress_printer(data, M_runs, t_mc_start));
 
-    bs_roll_true(m)  = true_bs_deg(1);
-    bs_pitch_true(m) = true_bs_deg(2);
-    bs_yaw_true(m)   = true_bs_deg(3);
-    scale_true_all(m)= true_scale_val * 100;
-
-    Cbs_true = rodrigues_so3_local(-true_bs_rad);
-
-    % 2. Ngẫu nhiên hóa dòng hải lưu của run m
-    Vc_run = 0.2 + 0.6 * rand();       % [0.2, 0.8] m/s
-    betaVc_run = 2 * pi * rand();       % [0, 360] deg
-    wc_run = 0.05 + 0.1 * rand();
-
-    % 3. Cấu hình cảm biến GEO-FOG 3D Dual
-    ins_spec = GEO_FOG_3D('spec');
-    bg_true_run = [deg2rad(0.2)/3600; -deg2rad(0.15)/3600; deg2rad(0.3)/3600] + ins_spec.gyro.bias_instab * randn(3, 1);
-    ba_true_run = [0.008; -0.012; 0.006] + ins_spec.acc.bias_instab * randn(3, 1);
-    ins_state = GEO_FOG_3D('init', ins_spec, bg_true_run, ba_true_run);
-
-    % Mô phỏng nghiêm ngặt theo đặc tính nhiễu cảm biến GEO-FOG 3D Dual
-    sigma_vrw = ins_spec.acc.vrw;
-    sigma_arw = ins_spec.gyro.arw;
-    acc_bias_sigma = ins_spec.acc.bias_instab;
-    acc_bias_tau = ins_spec.acc.bias_tau;
-    gyro_bias_rw = ins_spec.gyro.bias_rw;
-    scale_rw = 1e-5;
-    boresight_rw = 1e-5;
-
-    noise_cfg = [sigma_vrw; sigma_arw; acc_bias_sigma; acc_bias_tau; ...
-        gyro_bias_rw; scale_rw; boresight_rw; h];
-
-    gravity = 9.80665;
-    w_ie_ned = [0; 0; 7.292115e-5];
-    radius_n = 6378137.0; radius_m = 6356752.3;
-    tan_lat = tan(deg2rad(20.8)); height = 0;
-    lever_arm = [0.5; -0.1; 0.2] + 0.005 * randn(3, 1);
-
-    cfg = zeros(20, 1);
-    cfg(1) = h;
-    cfg(2) = gravity;
-    cfg(3:5) = w_ie_ned;
-    cfg(6) = radius_n;
-    cfg(7) = radius_m;
-    cfg(8) = tan_lat;
-    cfg(9) = height;
-    cfg(10:12) = lever_arm;
-    cfg(13) = 0.01;       % dvl_noise_floor
-    cfg(14) = 0.005;      % dvl_noise_slope
-    cfg(15) = ins_spec.gnss.pos_v;
-    cfg(16) = ins_spec.gnss.vel;
-    cfg(17) = ins_spec.gnss.heading;
-    cfg(18) = 0.05;       % sigma_depth
-    cfg(19) = acc_bias_tau;
-    cfg(20) = sigma_arw;
-
-    % 4. Khởi tạo trạng thái vật lý tàu REMUS 100
-    xn = 0; yn = 0; zn = 0; phi = 0; theta = 0;
-    psi = atan2(wpt.pos.y(2) - wpt.pos.y(1), wpt.pos.x(2) - wpt.pos.x(1));
-    U = 1.5;
-    x_phys = [U; zeros(5,1); xn; yn; zn; phi; theta; psi];
-
-    % 5. Khởi tạo ES-EKF 19 trạng thái (Cold-start từ 0)
-    [state_est, P_est, Q] = esekf19_init([phi; theta; psi], gravity, noise_cfg);
-    state_est(4:6) = eul2cbn_local(phi, theta, psi) * [U; 0; 0];
-    state_est(17) = 0.0;              % Scale cold-start = 0%
-    state_est(18:20) = [0.0; 0.0; 0.0]; % Boresight cold-start = [0;0;0]
-    P_est(4:6, 4:6)     = (1.5)^2 * eye(3);
-    P_est(16, 16)       = (0.05)^2;
-    P_est(17:19, 17:19) = deg2rad(5.0)^2 * eye(3);
-
-    clear ALOS3D integralSMCheading LOSobserver;
-
-
-    % Tham số bộ điều khiển
-    [~,~,Mauv] = remus100();
-    Kp_theta = Mauv(5,5) * 0.64;
-    Kd_theta = Mauv(5,5) * 1.28;
-    Ki_theta = Kp_theta * 0.08;
-    theta_int = 0; theta_d = 0; q_d = 0; psi_d = psi; r_d = 0;
-    n_p = 1300; delta_max = deg2rad(20);
-    ui_curr = [0; 0; n_p];
-
-    % Điểm ngẫu nhiên mất bám đáy DVL (20s trong pha lặn)
-    t_dvl_dropout_start = 600 + 700 * rand();
-    t_dvl_dropout_end   = t_dvl_dropout_start + 20;
-
-    eval_cnt = 0;
-    n_outlier_inj = 0; n_outlier_rej = 0;
-    locked_scale = 0.0; locked_boresight = [0.0; 0.0; 0.0];
-
-    for k = 1:nSteps
-        tk = t(k);
-        u_b = x_phys(1); v_b = x_phys(2); w_b = x_phys(3);
-        p_b = x_phys(4); q_b = x_phys(5); r_b = x_phys(6);
-        xn  = x_phys(7); yn  = x_phys(8); zn  = x_phys(9);
-        phi = x_phys(10); theta = x_phys(11); psi = x_phys(12);
-
-        Cbn_true = eul2cbn_local(phi, theta, psi);
-        v_ned_true = Cbn_true * [u_b; v_b; w_b];
-        v_body = [u_b; v_b; w_b];
-        omega_b = [p_b; q_b; r_b];
-
-        [xdot_true, ~] = remus100(x_phys, ui_curr, Vc_run, betaVc_run, wc_run);
-        a_b_true = xdot_true(1:3) + cross(omega_b, v_body);
-
-        w_en_ned = [v_ned_true(2)/(radius_n + height); ...
-            -v_ned_true(1)/(radius_m + height); ...
-            -v_ned_true(2)*tan_lat/(radius_n + height)];
-
-        f_b_true = a_b_true - Cbn_true' * [0; 0; gravity] + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true);
-        w_ib_b_true = omega_b + Cbn_true' * (w_ie_ned + w_en_ned);
-
-        % Sinh số đo IMU GEO-FOG 3D
-        [gyro_meas, accel_meas, ins_state] = GEO_FOG_3D('imu', ins_spec, ins_state, ...
-            w_ib_b_true, f_b_true, h);
-
-        flags = zeros(3, 1);
-        gnss_meas = zeros(7, 1); depth_meas = 0; dvl_meas = zeros(3, 1);
-
-        % Cập nhật đo đạc 5 Hz (mỗi 0.2s)
-        if mod(k, 4) == 0
-            % Cảm biến đo sâu
-            depth_meas = zn + 0.02 * randn;
-            flags(2) = 1;
-
-            % DVL (chỉ có khi không bị drop-out)
-            if ~(tk >= t_dvl_dropout_start && tk <= t_dvl_dropout_end)
-                v_lever = v_body + cross(omega_b, lever_arm);
-
-                v_dvl_ideal = (1.0 + true_scale_val) * Cbs_true * v_lever;
-                dvl_noise = 0.005 + 0.002 * norm(v_lever);
-                dvl_meas = v_dvl_ideal + dvl_noise * randn(3, 1);
-
-                % Bơm ngoại lai Outlier 1.5%
-                if rand() < 0.015
-                    dvl_meas = dvl_meas + [-1.5 + 3.0*rand(); -1.5 + 3.0*rand(); 0];
-                    n_outlier_inj = n_outlier_inj + 1;
-                end
-                flags(3) = 1;
-            end
-
-            % GNSS RTK mặt nước
-            if tk <= T_gnss_cut
-                gnss_meas = GEO_FOG_3D('gnss', ins_spec, [xn; yn; zn], v_ned_true, psi);
-                flags(1) = 1;
-            end
-        end
-
-        % Cấu hình chế độ lọc: Lặn ngầm (tk > T_gnss_cut) -> KHÓA Boresight & Scale
-        cfg_k = cfg;
-        if tk > T_gnss_cut
-            cfg_k(21) = 1; % Khóa cứng Boresight & Scale trong EKF để dồn thông tin DVL ước lượng tư thế & vận tốc
-            state_est(17) = locked_scale;
-            state_est(18:20) = locked_boresight;
-        end
-
-        % Bước lọc ES-EKF
-        [state_est, P_est, update_status, nis] = esekf19_step( ...
-            state_est, P_est, Q, gyro_meas, accel_meas, ...
-            gnss_meas, depth_meas, dvl_meas, flags, cfg_k);
-
-        if tk <= T_gnss_cut
-            locked_scale = state_est(17);
-            locked_boresight = state_est(18:20);
-        else
-            state_est(17) = locked_scale;
-            state_est(18:20) = locked_boresight;
-        end
-
-        if flags(3) == 1 && update_status(3) == 0
-            n_outlier_rej = n_outlier_rej + 1;
-        end
-
-
-        % Điều khiển khép vòng theo ước lượng EKF
-        p_hat = state_est(1:3);
-        [phi_hat, theta_hat, psi_hat] = quat_to_euler_local(state_est(7:10));
-
-        [psi_ref, theta_ref] = ALOS3D(p_hat(1), p_hat(2), p_hat(3), 25, 20, 0.001, 0.001, ...
-            deg2rad(20), h, 20, wpt);
-        [theta_d, q_d] = LOSobserver(theta_d, q_d, theta_ref, h, 0.5);
-        [psi_d, r_d]   = LOSobserver(psi_d, r_d, psi_ref, h, 0.5);
-        r_d = max(min(r_d, deg2rad(5)), -deg2rad(5));
-
-        r_gyro_c = gyro_meas(3) - state_est(16);
-        q_gyro_c = gyro_meas(2) - state_est(15);
-
-        delta_r = integralSMCheading(psi_hat, r_gyro_c, psi_d, r_d, 0, 0, 0.05, 1, 0.1, 0.25, 1.0, h);
-        delta_r = max(min(delta_r, delta_max), -delta_max);
-
-        delta_s = -Kp_theta * ssa(theta_hat - theta_d) - Kd_theta * q_gyro_c - Ki_theta * theta_int;
-        delta_s = max(min(delta_s, delta_max), -delta_max);
-
-        ui = [delta_r; -delta_s; n_p];
-        x_phys = rk4(@remus100, h, x_phys, ui, Vc_run, betaVc_run, wc_run);
-        theta_int = theta_int + h * ssa(theta_hat - theta_d);
-        ui_curr = ui;
-
-        % Ghi nhận mẫu thống kê
-        if mod(k - 1, sample_step) == 0
-            eval_cnt = eval_cnt + 1;
-
-            % Sai số vị trí
-            e_pos = [xn - p_hat(1); yn - p_hat(2); zn - p_hat(3)];
-            err_pos_N(eval_cnt, m) = e_pos(1);
-            err_pos_E(eval_cnt, m) = e_pos(2);
-            err_pos_D(eval_cnt, m) = e_pos(3);
-            err_pos_3D(eval_cnt, m) = norm(e_pos);
-
-            % Sai số vận tốc
-            e_vel = v_ned_true - state_est(4:6);
-
-            % Sai số tư thế trên SO(3)
-            Cbn_est = quat_to_cbn_local(state_est(7:10));
-            R_err_att = Cbn_est' * Cbn_true;
-            e_att = so3_log_local(R_err_att);
-            err_roll_deg(eval_cnt, m)  = rad2deg(e_att(1));
-            err_pitch_deg(eval_cnt, m) = rad2deg(e_att(2));
-            err_yaw_deg(eval_cnt, m)   = rad2deg(e_att(3));
-
-            % Sai số bias cảm biến so với chân lý tức thời
-            e_ba = ins_state.ba_total - state_est(11:13);
-            e_bg = ins_state.bg_total - state_est(14:16);
-
-            % Sai số Boresight & Scale
-            e_scale = true_scale_val - state_est(17);
-            Cbs_est = rodrigues_so3_local(-state_est(18:20));
-            R_err_bs = Cbs_est' * Cbs_true;
-            e_bs = -so3_log_local(R_err_bs);
-
-            bs_roll_est(eval_cnt, m)  = rad2deg(state_est(18));
-            bs_pitch_est(eval_cnt, m) = rad2deg(state_est(19));
-            bs_yaw_est(eval_cnt, m)   = rad2deg(state_est(20));
-            scale_est_all(eval_cnt, m)= state_est(17) * 100;
-
-            % Vector sai số toàn hệ 19D
-            e_k = [e_pos; e_vel; e_att; e_ba; e_bg; e_scale; e_bs];
-
-            % Tích lũy NEES
-            sum_nees(eval_cnt)      = sum_nees(eval_cnt)      + (e_k' / P_est) * e_k;
-            sum_nees_pos(eval_cnt)  = sum_nees_pos(eval_cnt)  + (e_pos' / P_est(1:3, 1:3)) * e_pos;
-            sum_nees_vel(eval_cnt)  = sum_nees_vel(eval_cnt)  + (e_vel' / P_est(4:6, 4:6)) * e_vel;
-            sum_nees_att(eval_cnt)  = sum_nees_att(eval_cnt)  + (e_att' / P_est(7:9, 7:9)) * e_att;
-            sum_nees_bias(eval_cnt) = sum_nees_bias(eval_cnt) + ([e_ba; e_bg]' / P_est(10:15, 10:15)) * [e_ba; e_bg];
-            sum_nees_cal(eval_cnt)  = sum_nees_cal(eval_cnt)  + ([e_scale; e_bs]' / P_est(16:19, 16:19)) * [e_scale; e_bs];
-
-            % Tích lũy bình phương sai số RMSE & phương sai 3-sigma
-            sum_sq_pos(eval_cnt, :) = sum_sq_pos(eval_cnt, :) + (e_pos').^2;
-            sum_sq_vel(eval_cnt, :) = sum_sq_vel(eval_cnt, :) + (e_vel').^2;
-            sum_sq_att(eval_cnt, :) = sum_sq_att(eval_cnt, :) + (rad2deg(e_att')).^2;
-            sum_sq_bg(eval_cnt, :)  = sum_sq_bg(eval_cnt, :)  + (rad2deg(e_bg') * 3600).^2;
-            sum_sq_ba(eval_cnt, :)  = sum_sq_ba(eval_cnt, :)  + (e_ba' / 9.80665 * 1000).^2;
-
-            sum_var_pos(eval_cnt, :) = sum_var_pos(eval_cnt, :) + diag(P_est(1:3, 1:3))';
-            sum_var_vel(eval_cnt, :) = sum_var_vel(eval_cnt, :) + diag(P_est(4:6, 4:6))';
-            sum_var_att(eval_cnt, :) = sum_var_att(eval_cnt, :) + (rad2deg(sqrt(diag(P_est(7:9, 7:9)))))'.^2;
-            sum_var_ba(eval_cnt, :)  = sum_var_ba(eval_cnt, :)  + (sqrt(diag(P_est(10:12, 10:12)))' / 9.80665 * 1000).^2;
-            sum_var_bg(eval_cnt, :)  = sum_var_bg(eval_cnt, :)  + (rad2deg(sqrt(diag(P_est(13:15, 13:15))))' * 3600).^2;
-            sum_var_bs(eval_cnt, :)  = sum_var_bs(eval_cnt, :)  + (rad2deg(sqrt(diag(P_est(17:19, 17:19)))))'.^2;
-            sum_var_scale(eval_cnt)  = sum_var_scale(eval_cnt)  + (sqrt(P_est(16, 16)) * 100)^2;
-
-            if m == 1
-                traj_N_true(eval_cnt) = xn;
-                traj_E_true(eval_cnt) = yn;
-                traj_D_true(eval_cnt) = zn;
-                traj_N_est(eval_cnt)  = p_hat(1);
-                traj_E_est(eval_cnt)  = p_hat(2);
-                traj_D_est(eval_cnt)  = p_hat(3);
-            end
-        end
+    parfor m = 1:M_runs
+        sim_results(m) = run_single_simulation(m, wpt, h, T_final, T_gnss_cut, sample_step, nEval, t_eval, q);
     end
-
-    pos_final_true(m, :) = [xn, yn, zn];
-    pos_final_est(m, :)  = p_hat';
-    outlier_injected_count(m) = n_outlier_inj;
-    outlier_rejected_count(m) = n_outlier_rej;
-
-    t_run = toc(t_run_start);
-    t_total_elap = toc(t_mc_start);
-    eta_sec = (t_total_elap / m) * (M_runs - m);
-    fprintf('Run %3d / %d hoàn thành trong %5.1fs | Đã chạy: %5.1f ph | Còn lại: ~%5.1f ph\n', ...
-        m, M_runs, t_run, t_total_elap/60, eta_sec/60);
+else
+    for m = 1:M_runs
+        sim_results(m) = run_single_simulation(m, wpt, h, T_final, T_gnss_cut, sample_step, nEval, t_eval, []);
+        t_elap = toc(t_mc_start);
+        eta_sec = (t_elap / m) * (M_runs - m);
+        fprintf('Run %3d / %d hoàn thành | Đã chạy: %5.1f ph | Còn lại: ~%5.1f ph\n', ...
+            m, M_runs, t_elap/60, eta_sec/60);
+    end
 end
+
+% Giải nén và tổng hợp kết quả thống kê Monte Carlo
+fprintf('\nĐang tổng hợp dữ liệu từ %d run Monte Carlo...\n', M_runs);
+for m = 1:M_runs
+    err_pos_N(:, m) = sim_results(m).err_pos_N;
+    err_pos_E(:, m) = sim_results(m).err_pos_E;
+    err_pos_D(:, m) = sim_results(m).err_pos_D;
+    err_pos_3D(:, m) = sim_results(m).err_pos_3D;
+    err_roll_deg(:, m) = sim_results(m).err_roll_deg;
+    err_pitch_deg(:, m) = sim_results(m).err_pitch_deg;
+    err_yaw_deg(:, m) = sim_results(m).err_yaw_deg;
+
+    bs_roll_est(:, m) = sim_results(m).bs_roll_est;
+    bs_pitch_est(:, m) = sim_results(m).bs_pitch_est;
+    bs_yaw_est(:, m) = sim_results(m).bs_yaw_est;
+    scale_est_all(:, m) = sim_results(m).scale_est_all;
+
+    bs_roll_true(m) = sim_results(m).bs_roll_true;
+    bs_pitch_true(m) = sim_results(m).bs_pitch_true;
+    bs_yaw_true(m) = sim_results(m).bs_yaw_true;
+    scale_true_all(m) = sim_results(m).scale_true_all;
+
+    pos_final_true(m, :) = sim_results(m).pos_final_true;
+    pos_final_est(m, :)  = sim_results(m).pos_final_est;
+    outlier_injected_count(m) = sim_results(m).n_outlier_inj;
+    outlier_rejected_count(m) = sim_results(m).n_outlier_rej;
+
+    sum_nees      = sum_nees      + sim_results(m).nees;
+    sum_nees_pos  = sum_nees_pos  + sim_results(m).nees_pos;
+    sum_nees_vel  = sum_nees_vel  + sim_results(m).nees_vel;
+    sum_nees_att  = sum_nees_att  + sim_results(m).nees_att;
+    sum_nees_bias = sum_nees_bias + sim_results(m).nees_bias;
+    sum_nees_cal  = sum_nees_cal  + sim_results(m).nees_cal;
+
+    sum_sq_pos = sum_sq_pos + sim_results(m).sq_pos;
+    sum_sq_vel = sum_sq_vel + sim_results(m).sq_vel;
+    sum_sq_att = sum_sq_att + sim_results(m).sq_att;
+    sum_sq_bg  = sum_sq_bg  + sim_results(m).sq_bg;
+    sum_sq_ba  = sum_sq_ba  + sim_results(m).sq_ba;
+
+    sum_var_pos = sum_var_pos + sim_results(m).var_pos;
+    sum_var_vel = sum_var_vel + sim_results(m).var_vel;
+    sum_var_att = sum_var_att + sim_results(m).var_att;
+    sum_var_ba  = sum_var_ba  + sim_results(m).var_ba;
+    sum_var_bg  = sum_var_bg  + sim_results(m).var_bg;
+    sum_var_bs  = sum_var_bs  + sim_results(m).var_bs;
+    sum_var_scale = sum_var_scale + sim_results(m).var_scale;
+end
+
+traj_N_true = sim_results(1).traj_N_true;
+traj_E_true = sim_results(1).traj_E_true;
+traj_D_true = sim_results(1).traj_D_true;
+traj_N_est  = sim_results(1).traj_N_est;
+traj_E_est  = sim_results(1).traj_E_est;
+traj_D_est  = sim_results(1).traj_D_est;
 
 %% XUẤT ĐỒ THỊ BÁO CÁO VÀ NGHIỆM THU
 fprintf('\nĐang tổng hợp dữ liệu và xuất 5 hình ảnh nghiệm thu chuẩn...\n');
@@ -978,6 +771,367 @@ if exist('chi2inv', 'file') == 2
 else
     z = sqrt(2) * erfinv(2*p - 1);
     q = d * (1 - 2/(9*d) + z*sqrt(2/(9*d)))^3;
+end
+end
+
+function progress_printer(m, M_runs, t_start)
+persistent completed_count
+if isempty(completed_count)
+    completed_count = 0;
+end
+completed_count = completed_count + 1;
+t_elap = toc(t_start);
+eta_sec = (t_elap / completed_count) * (M_runs - completed_count);
+fprintf('[Đa nhân] Hoàn thành %3d / %d run (%5.1f%%) | Đã chạy: %5.1f ph | Còn lại: ~%5.1f ph\n', ...
+    completed_count, M_runs, (completed_count / M_runs) * 100, t_elap / 60, eta_sec / 60);
+end
+
+function res = run_single_simulation(m, wpt, h, T_final, T_gnss_cut, sample_step, nEval, t_eval, q)
+% Đảm bảo cô lập persistent variables trên worker độc lập
+clear('ALOS3D', 'integralSMCheading');
+
+% Mầm số ngẫu nhiên độc lập cho từng run
+rng(2026 + m * 7, 'twister');
+
+% 1. Ngẫu nhiên hóa Boresight & Scale thật của run m
+true_bs_deg = [ ...
+    -3.0 + 6.0 * rand(); ...   % Roll [-3, +3] deg
+    -3.0 + 6.0 * rand(); ...   % Pitch [-3, +3] deg
+    -5.0 + 10.0 * rand()];     % Yaw [-5, +5] deg
+true_bs_rad = deg2rad(true_bs_deg);
+true_scale_val = -0.03 + 0.06 * rand(); % Scale [-3%, +3%]
+
+res.bs_roll_true  = true_bs_deg(1);
+res.bs_pitch_true = true_bs_deg(2);
+res.bs_yaw_true   = true_bs_deg(3);
+res.scale_true_all= true_scale_val * 100;
+
+Cbs_true = rodrigues_so3_local(-true_bs_rad);
+
+% 2. Ngẫu nhiên hóa dòng hải lưu của run m
+Vc_run = 0.2 + 0.6 * rand();       % [0.2, 0.8] m/s
+betaVc_run = 2 * pi * rand();       % [0, 360] deg
+wc_run = 0.05 + 0.1 * rand();
+
+% 3. Cấu hình cảm biến GEO-FOG 3D Dual
+ins_spec = GEO_FOG_3D('spec');
+bg_true_run = [deg2rad(0.2)/3600; -deg2rad(0.15)/3600; deg2rad(0.3)/3600] + ins_spec.gyro.bias_instab * randn(3, 1);
+ba_true_run = [0.008; -0.012; 0.006] + ins_spec.acc.bias_instab * randn(3, 1);
+ins_state = GEO_FOG_3D('init', ins_spec, bg_true_run, ba_true_run);
+
+% Mô phỏng nghiêm ngặt theo đặc tính nhiễu cảm biến GEO-FOG 3D Dual
+sigma_vrw = ins_spec.acc.vrw;
+sigma_arw = ins_spec.gyro.arw;
+acc_bias_sigma = ins_spec.acc.bias_instab;
+acc_bias_tau = ins_spec.acc.bias_tau;
+gyro_bias_rw = ins_spec.gyro.bias_rw;
+scale_rw = 1e-5;
+boresight_rw = 1e-5;
+
+noise_cfg = [sigma_vrw; sigma_arw; acc_bias_sigma; acc_bias_tau; ...
+    gyro_bias_rw; scale_rw; boresight_rw; h];
+
+gravity = 9.80665;
+w_ie_ned = [0; 0; 7.292115e-5];
+radius_n = 6378137.0; radius_m = 6356752.3;
+tan_lat = tan(deg2rad(20.8)); height = 0;
+lever_arm = [0.5; -0.1; 0.2] + 0.005 * randn(3, 1);
+
+cfg = zeros(21, 1);
+cfg(1) = h;
+cfg(2) = gravity;
+cfg(3:5) = w_ie_ned;
+cfg(6) = radius_n;
+cfg(7) = radius_m;
+cfg(8) = tan_lat;
+cfg(9) = height;
+cfg(10:12) = lever_arm;
+cfg(13) = 0.01;       % dvl_noise_floor
+cfg(14) = 0.005;      % dvl_noise_slope
+cfg(15) = ins_spec.gnss.pos_v;
+cfg(16) = ins_spec.gnss.vel;
+cfg(17) = ins_spec.gnss.heading;
+cfg(18) = 0.05;       % sigma_depth
+cfg(19) = acc_bias_tau;
+cfg(20) = sigma_arw;
+
+% 4. Khởi tạo trạng thái vật lý tàu REMUS 100
+xn = 0; yn = 0; zn = 0; phi = 0; theta = 0;
+psi = atan2(wpt.pos.y(2) - wpt.pos.y(1), wpt.pos.x(2) - wpt.pos.x(1));
+U = 1.5;
+x_phys = [U; zeros(5,1); xn; yn; zn; phi; theta; psi];
+
+% 5. Khởi tạo ES-EKF 19 trạng thái (Cold-start từ 0)
+[state_est, P_est, Q] = esekf19_init([phi; theta; psi], gravity, noise_cfg);
+state_est(4:6) = eul2cbn_local(phi, theta, psi) * [U; 0; 0];
+state_est(17) = 0.0;              % Scale cold-start = 0%
+state_est(18:20) = [0.0; 0.0; 0.0]; % Boresight cold-start = [0;0;0]
+P_est(4:6, 4:6)     = (1.5)^2 * eye(3);
+P_est(16, 16)       = (0.05)^2;
+P_est(17:19, 17:19) = deg2rad(5.0)^2 * eye(3);
+
+% Tham số bộ điều khiển
+[~,~,Mauv] = remus100();
+Kp_theta = Mauv(5,5) * 0.64;
+Kd_theta = Mauv(5,5) * 1.28;
+Ki_theta = Kp_theta * 0.08;
+theta_int = 0; theta_d = 0; q_d = 0; psi_d = psi; r_d = 0;
+n_p = 1300; delta_max = deg2rad(20);
+ui_curr = [0; 0; n_p];
+
+% Điểm ngẫu nhiên mất bám đáy DVL (20s trong pha lặn)
+t_dvl_dropout_start = 600 + 700 * rand();
+t_dvl_dropout_end   = t_dvl_dropout_start + 20;
+
+eval_cnt = 0;
+n_outlier_inj = 0; n_outlier_rej = 0;
+locked_scale = 0.0; locked_boresight = [0.0; 0.0; 0.0];
+
+% Cấp phát bộ nhớ cho các mảng kết quả của run m
+res.err_pos_N    = zeros(nEval, 1);
+res.err_pos_E    = zeros(nEval, 1);
+res.err_pos_D    = zeros(nEval, 1);
+res.err_pos_3D   = zeros(nEval, 1);
+res.err_roll_deg = zeros(nEval, 1);
+res.err_pitch_deg= zeros(nEval, 1);
+res.err_yaw_deg  = zeros(nEval, 1);
+
+res.bs_roll_est  = zeros(nEval, 1);
+res.bs_pitch_est = zeros(nEval, 1);
+res.bs_yaw_est   = zeros(nEval, 1);
+res.scale_est_all= zeros(nEval, 1);
+
+res.nees         = zeros(nEval, 1);
+res.nees_pos     = zeros(nEval, 1);
+res.nees_vel     = zeros(nEval, 1);
+res.nees_att     = zeros(nEval, 1);
+res.nees_bias    = zeros(nEval, 1);
+res.nees_cal     = zeros(nEval, 1);
+
+res.sq_pos       = zeros(nEval, 3);
+res.sq_vel       = zeros(nEval, 3);
+res.sq_att       = zeros(nEval, 3);
+res.sq_bg        = zeros(nEval, 3);
+res.sq_ba        = zeros(nEval, 3);
+
+res.var_pos      = zeros(nEval, 3);
+res.var_vel      = zeros(nEval, 3);
+res.var_att      = zeros(nEval, 3);
+res.var_ba       = zeros(nEval, 3);
+res.var_bg       = zeros(nEval, 3);
+res.var_bs       = zeros(nEval, 3);
+res.var_scale    = zeros(nEval, 1);
+
+res.traj_N_true  = zeros(nEval, 1);
+res.traj_E_true  = zeros(nEval, 1);
+res.traj_D_true  = zeros(nEval, 1);
+res.traj_N_est   = zeros(nEval, 1);
+res.traj_E_est   = zeros(nEval, 1);
+res.traj_D_est   = zeros(nEval, 1);
+
+t = 0:h:T_final;
+nSteps = length(t);
+
+for k = 1:nSteps
+    tk = t(k);
+    u_b = x_phys(1); v_b = x_phys(2); w_b = x_phys(3);
+    p_b = x_phys(4); q_b = x_phys(5); r_b = x_phys(6);
+    xn  = x_phys(7); yn  = x_phys(8); zn  = x_phys(9);
+    phi = x_phys(10); theta = x_phys(11); psi = x_phys(12);
+
+    Cbn_true = eul2cbn_local(phi, theta, psi);
+    v_ned_true = Cbn_true * [u_b; v_b; w_b];
+    v_body = [u_b; v_b; w_b];
+    omega_b = [p_b; q_b; r_b];
+
+    [xdot_true, ~] = remus100(x_phys, ui_curr, Vc_run, betaVc_run, wc_run);
+    a_b_true = xdot_true(1:3) + cross(omega_b, v_body);
+
+    w_en_ned = [v_ned_true(2)/(radius_n + height); ...
+        -v_ned_true(1)/(radius_m + height); ...
+        -v_ned_true(2)*tan_lat/(radius_n + height)];
+
+    f_b_true = a_b_true - Cbn_true' * [0; 0; gravity] + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true);
+    w_ib_b_true = omega_b + Cbn_true' * (w_ie_ned + w_en_ned);
+
+    % Sinh số đo IMU GEO-FOG 3D
+    [gyro_meas, accel_meas, ins_state] = GEO_FOG_3D('imu', ins_spec, ins_state, ...
+        w_ib_b_true, f_b_true, h);
+
+    flags = zeros(3, 1);
+    gnss_meas = zeros(7, 1); depth_meas = 0; dvl_meas = zeros(3, 1);
+
+    % Cập nhật đo đạc 5 Hz (mỗi 0.2s)
+    if mod(k, 4) == 0
+        depth_meas = zn + 0.02 * randn;
+        flags(2) = 1;
+
+        if ~(tk >= t_dvl_dropout_start && tk <= t_dvl_dropout_end)
+            v_lever = v_body + cross(omega_b, lever_arm);
+
+            v_dvl_ideal = (1.0 + true_scale_val) * Cbs_true * v_lever;
+            dvl_noise = 0.005 + 0.002 * norm(v_lever);
+            dvl_meas = v_dvl_ideal + dvl_noise * randn(3, 1);
+
+            % Bơm ngoại lai Outlier 1.5%
+            if rand() < 0.015
+                dvl_meas = dvl_meas + [-1.5 + 3.0*rand(); -1.5 + 3.0*rand(); 0];
+                n_outlier_inj = n_outlier_inj + 1;
+            end
+            flags(3) = 1;
+        end
+
+        % GNSS RTK mặt nước
+        if tk <= T_gnss_cut
+            gnss_meas = GEO_FOG_3D('gnss', ins_spec, [xn; yn; zn], v_ned_true, psi);
+            flags(1) = 1;
+        end
+    end
+
+    % Lặn ngầm (tk > T_gnss_cut) -> KHÓA Boresight & Scale
+    cfg_k = cfg;
+    if tk > T_gnss_cut
+        cfg_k(21) = 1;
+        state_est(17) = locked_scale;
+        state_est(18:20) = locked_boresight;
+    end
+
+    % Bước lọc ES-EKF
+    [state_est, P_est, update_status, nis] = esekf19_step( ...
+        state_est, P_est, Q, gyro_meas, accel_meas, ...
+        gnss_meas, depth_meas, dvl_meas, flags, cfg_k);
+
+    if tk <= T_gnss_cut
+        locked_scale = state_est(17);
+        locked_boresight = state_est(18:20);
+    else
+        state_est(17) = locked_scale;
+        state_est(18:20) = locked_boresight;
+    end
+
+    if flags(3) == 1 && update_status(3) == 0
+        n_outlier_rej = n_outlier_rej + 1;
+    end
+
+    % Điều khiển khép vòng theo ước lượng EKF
+    p_hat = state_est(1:3);
+    [phi_hat, theta_hat, psi_hat] = quat_to_euler_local(state_est(7:10));
+
+    [psi_ref, theta_ref] = ALOS3D(p_hat(1), p_hat(2), p_hat(3), 25, 20, 0.001, 0.001, ...
+        deg2rad(20), h, 20, wpt);
+    [theta_d, q_d] = LOSobserver(theta_d, q_d, theta_ref, h, 0.5);
+    [psi_d, r_d]   = LOSobserver(psi_d, r_d, psi_ref, h, 0.5);
+    r_d = max(min(r_d, deg2rad(5)), -deg2rad(5));
+
+    r_gyro_c = gyro_meas(3) - state_est(16);
+    q_gyro_c = gyro_meas(2) - state_est(15);
+
+    delta_r = integralSMCheading(psi_hat, r_gyro_c, psi_d, r_d, 0, 0, 0.05, 1, 0.1, 0.25, 1.0, h);
+    delta_r = max(min(delta_r, delta_max), -delta_max);
+
+    delta_s = -Kp_theta * ssa(theta_hat - theta_d) - Kd_theta * q_gyro_c - Ki_theta * theta_int;
+    delta_s = max(min(delta_s, delta_max), -delta_max);
+
+    ui = [delta_r; -delta_s; n_p];
+    x_phys = rk4(@remus100, h, x_phys, ui, Vc_run, betaVc_run, wc_run);
+    theta_int = theta_int + h * ssa(theta_hat - theta_d);
+    ui_curr = ui;
+
+    % Ghi nhận mẫu thống kê
+    if mod(k - 1, sample_step) == 0
+        eval_cnt = eval_cnt + 1;
+
+        % Sai số vị trí
+        e_pos = [xn - p_hat(1); yn - p_hat(2); zn - p_hat(3)];
+        res.err_pos_N(eval_cnt) = e_pos(1);
+        res.err_pos_E(eval_cnt) = e_pos(2);
+        res.err_pos_D(eval_cnt) = e_pos(3);
+        res.err_pos_3D(eval_cnt) = norm(e_pos);
+
+        % Sai số vận tốc
+        e_vel = v_ned_true - state_est(4:6);
+
+        % Sai số tư thế trên SO(3)
+        Cbn_est = quat_to_cbn_local(state_est(7:10));
+        R_err_att = Cbn_est' * Cbn_true;
+        e_att = so3_log_local(R_err_att);
+        res.err_roll_deg(eval_cnt)  = rad2deg(e_att(1));
+        res.err_pitch_deg(eval_cnt) = rad2deg(e_att(2));
+        res.err_yaw_deg(eval_cnt)   = rad2deg(e_att(3));
+
+        % Sai số bias cảm biến so với chân lý tức thời
+        e_ba = ins_state.ba_total - state_est(11:13);
+        e_bg = ins_state.bg_total - state_est(14:16);
+
+        % Sai số Boresight & Scale
+        e_scale = true_scale_val - state_est(17);
+        Cbs_est = rodrigues_so3_local(-state_est(18:20));
+        R_err_bs = Cbs_est' * Cbs_true;
+        e_bs = -so3_log_local(R_err_bs);
+
+        res.bs_roll_est(eval_cnt)  = rad2deg(state_est(18));
+        res.bs_pitch_est(eval_cnt) = rad2deg(state_est(19));
+        res.bs_yaw_est(eval_cnt)   = rad2deg(state_est(20));
+        res.scale_est_all(eval_cnt)= state_est(17) * 100;
+
+        % Vector sai số toàn hệ 19D
+        e_k = [e_pos; e_vel; e_att; e_ba; e_bg; e_scale; e_bs];
+
+        % TÍNH TOÁN NEES CHUẨN HÓA (ĐẢM BẢO 0 CẢNH BÁO RCOND / BADLY SCALED)
+        % Chuẩn hóa đường chéo để triệt tiêu lệch thứ nguyên giữa m^2 và (rad/s)^2
+        d_diag = sqrt(max(diag(P_est), 1e-22));
+        P_scaled = P_est ./ (d_diag * d_diag');
+        P_scaled = 0.5 * (P_scaled + P_scaled') + 1e-12 * eye(19);
+        e_scaled = e_k ./ d_diag;
+        res.nees(eval_cnt) = e_scaled' * (P_scaled \ e_scaled);
+
+        res.nees_pos(eval_cnt) = e_pos' * (P_est(1:3, 1:3) \ e_pos);
+        res.nees_vel(eval_cnt) = e_vel' * (P_est(4:6, 4:6) \ e_vel);
+        res.nees_att(eval_cnt) = e_att' * (P_est(7:9, 7:9) \ e_att);
+
+        % Nhóm Bias 6D: Chuẩn hóa tỉ lệ giữa Accel bias (m/s^2) và Gyro bias (rad/s)
+        d_bias = sqrt(max(diag(P_est(10:15, 10:15)), 1e-22));
+        P_bias_scaled = P_est(10:15, 10:15) ./ (d_bias * d_bias');
+        P_bias_scaled = 0.5 * (P_bias_scaled + P_bias_scaled') + 1e-12 * eye(6);
+        e_bias = [e_ba; e_bg];
+        e_bias_scaled = e_bias ./ d_bias;
+        res.nees_bias(eval_cnt) = e_bias_scaled' * (P_bias_scaled \ e_bias_scaled);
+
+        % Nhóm Hiệu chuẩn 4D
+        e_cal = [e_scale; e_bs];
+        res.nees_cal(eval_cnt) = e_cal' * (P_est(16:19, 16:19) \ e_cal);
+
+        % Tích lũy bình phương sai số RMSE & phương sai 3-sigma
+        res.sq_pos(eval_cnt, :) = (e_pos').^2;
+        res.sq_vel(eval_cnt, :) = (e_vel').^2;
+        res.sq_att(eval_cnt, :) = (rad2deg(e_att')).^2;
+        res.sq_bg(eval_cnt, :)  = (rad2deg(e_bg') * 3600).^2;
+        res.sq_ba(eval_cnt, :)  = (e_ba' / 9.80665 * 1000).^2;
+
+        res.var_pos(eval_cnt, :) = diag(P_est(1:3, 1:3))';
+        res.var_vel(eval_cnt, :) = diag(P_est(4:6, 4:6))';
+        res.var_att(eval_cnt, :) = (rad2deg(sqrt(diag(P_est(7:9, 7:9)))))'.^2;
+        res.var_ba(eval_cnt, :)  = (sqrt(diag(P_est(10:12, 10:12)))' / 9.80665 * 1000).^2;
+        res.var_bg(eval_cnt, :)  = (rad2deg(sqrt(diag(P_est(13:15, 13:15))))' * 3600).^2;
+        res.var_bs(eval_cnt, :)  = (rad2deg(sqrt(diag(P_est(17:19, 17:19)))))'.^2;
+        res.var_scale(eval_cnt)  = (sqrt(P_est(16, 16)) * 100)^2;
+
+        res.traj_N_true(eval_cnt) = xn;
+        res.traj_E_true(eval_cnt) = yn;
+        res.traj_D_true(eval_cnt) = zn;
+        res.traj_N_est(eval_cnt)  = p_hat(1);
+        res.traj_E_est(eval_cnt)  = p_hat(2);
+        res.traj_D_est(eval_cnt)  = p_hat(3);
+    end
+end
+
+res.pos_final_true = [xn, yn, zn];
+res.pos_final_est  = p_hat';
+res.n_outlier_inj  = n_outlier_inj;
+res.n_outlier_rej  = n_outlier_rej;
+
+if ~isempty(q)
+    send(q, m);
 end
 end
 
