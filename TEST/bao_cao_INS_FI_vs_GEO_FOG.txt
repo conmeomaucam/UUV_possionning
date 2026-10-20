@@ -1,0 +1,27 @@
+==========================================================================================
+  DOI SOAT ES-EKF: INS-DM-FI vs GEO-FOG 3D DUAL (ca hai KHONG tu ke, cung seed, cung quy dao)
+==========================================================================================
+| Chi tieu                                 |            INS-DM-FI |      GEO-FOG 3D Dual |
+|------------------------------------------|----------------------|----------------------|
+| Sai so 3D luc cat GNSS (m)               |              532.439 |                0.005 |
+| Sai so 3D cuoi hanh trinh (m)            |             48787.33 |                 0.25 |
+| Sai so 3D cuc dai (m)                    |             48787.33 |                 0.68 |
+| Quang duong lan (m)                      |               2176.8 |               2920.3 |
+| Do troi / quang duong lan (%)            |             2241.241 |                0.008 |
+| Sai so North cuoi (m)                    |             16596.61 |                -0.21 |
+| Sai so East cuoi (m)                     |            -45772.54 |                 0.12 |
+| Sai so Down cuoi (m)                     |            -3103.341 |                0.005 |
+| Sai so Yaw luc cat GNSS (deg)            |               0.0241 |               0.0001 |
+| Sai so Yaw cuoi (deg)                    |               0.0017 |               0.0376 |
+| |Sai so Yaw| cuc dai khi lan (deg)       |               0.0351 |               0.1270 |
+| Sai so bias gyro z luc cat GNSS (deg/h)  |               0.3198 |               0.0567 |
+| Sai so Boresight Roll (deg)              |                5.078 |                0.194 |
+| Sai so Boresight Pitch (deg)             |                0.641 |                0.033 |
+| Sai so Boresight Yaw (deg)               |                0.159 |                0.025 |
+| Sai so Scale DVL (%)                     |                0.028 |                0.003 |
+| Ty le chap nhan GNSS (%)                 |                18.88 |                94.25 |
+| Ty le chap nhan Depth (%)                |                 5.20 |                98.82 |
+| Ty le chap nhan DVL (%)                  |                 6.94 |                98.85 |
+==========================================================================================
+Tham chieu cau hinh cu (tham so khong theo datasheet: ARW 0.001 rad/sqrt(s), gyro RW 1e-5):
+  sai so 3D cuoi 859.22 m, sai so Yaw cuoi 43.84 deg.

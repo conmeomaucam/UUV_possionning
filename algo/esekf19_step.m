@@ -118,6 +118,10 @@ F(7:9, 13:15) = -eye(3)*dt;
 F(10:12, 10:12) = phi_acc * eye(3);
 
 % Lan truyền ma trận P: P_k = F * P_(k-1) * F' + Q
+lock_calib = (length(cfg) >= 21 && cfg(21) ~= 0);
+if lock_calib
+    process_noise(16:19, 16:19) = 0;
+end
 covariance = F*covariance*F' + process_noise;
 
 % =========================================================================
@@ -192,7 +196,7 @@ if measurement_flags(2) ~= 0
 end
 
 % -------------------------------------------------------------------------
-% 4.3. CẬP NHẬT VẬN TỐC ĐÁY DVL A125 (ƯỚC LƯỢNG BORESIGHT VÀ SCALE FACTOR)
+% 4.3. CẬP NHẬT VẬN TỐC ĐÁY DVL A125 (ƯỚC LƯỢNG BORESIGHT VÀ SCALE FACTOR HOẶC KHÓA ĐỂ ƯỚC LƯỢNG TƯ THẾ)
 % -------------------------------------------------------------------------
 if measurement_flags(3) ~= 0
     % Gọi trực tiếp hàm mô hình DVL dùng chung
@@ -202,6 +206,15 @@ if measurement_flags(3) ~= 0
 
     residual = dvl_meas - h_dvl;
 
+    % Kiểm tra cờ khóa hiệu chuẩn (Chế độ lặn ngầm / Navigation mode):
+    % Khi khóa, không cập nhật Boresight & Scale; dồn 100% thông tin DVL ước lượng Tư thế và Vận tốc
+    lock_calib = (length(cfg) >= 21 && cfg(21) ~= 0);
+    if lock_calib
+        H(:, 16:19) = 0; % Triệt tiêu gradient theo Scale và Boresight
+        covariance(16:19, 1:15) = 0; % Tách biệt tương quan khỏi các biến động lực học
+        covariance(1:15, 16:19) = 0;
+    end
+
     % Cập nhật Kalman và kiểm tra cổng lọc NIS (3 bậc tự do, ngưỡng 99% là 11.34)
     [delta_state, covariance, accepted, nis_value] = ...
         update_dvl(covariance, H, residual, R_dvl);
@@ -209,6 +222,9 @@ if measurement_flags(3) ~= 0
     nis(3) = nis_value;
 
     if accepted ~= 0
+        if lock_calib
+            delta_state(16:19) = 0; % Cố định tuyệt đối Scale và Boresight
+        end
         [position, velocity, quaternion, accel_bias, gyro_bias, scale, boresight, covariance] = ...
             esekf19_inject_error(delta_state, covariance, position, velocity, quaternion, ...
             accel_bias, gyro_bias, scale, boresight);

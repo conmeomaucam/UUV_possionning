@@ -1,0 +1,21 @@
+========================================================================================
+  BAO CAO KET QUA SO SANH: FOSSEN STANDALONE VS FOSSEN + ES-EKF 19 TRANG THAI
+========================================================================================
+
+1. TONG QUAN THI NGHIEM:
+   - Thoi gian mo phong: 1400 giay (28,001 buoc, h = 0.05s)
+   - Cat GNSS sau: 30.0 giay (tau lan ngam hoan toan duoi nuoc)
+   - Boresight that: Roll = 1.50 deg, Pitch = -2.00 deg, Yaw = 3.00 deg
+   - Scale factor DVL that: +1.50 %
+
+2. KET QUA HIEU CHUAN TRUC TUYEN (COLD START: Boresight = [0;0;0], Scale = 0):
+   - Boresight Roll : Uoc luong =  1.478 deg | That =  1.500 deg | Sai so =  0.022 deg
+   - Boresight Pitch: Uoc luong = -1.994 deg | That = -2.000 deg | Sai so =  0.006 deg
+   - Boresight Yaw  : Uoc luong =  3.140 deg | That =  3.000 deg | Sai so =  0.140 deg
+   - DVL Scale      : Uoc luong =  1.297 %   | That =  1.500 %   | Sai so =  0.203 %
+
+3. PHAN TICH SAI SO BAM QUY DAO VA DO TROI:
+   - Fossen Standalone: Cross-track max = 7.32 m, TB = 0.41 m (do biet truc tiep vi tri that)
+   - Fossen + ES-EKF  : Cross-track max = 15.41 m, TB = 2.25 m (lai dua vao vi tri uoc luong)
+   - Sai so vi tri 3D cuoi cung: 532.38 m tren tong quang duong 3130.03 m (Ty le troi: 17.01 %)
+========================================================================================

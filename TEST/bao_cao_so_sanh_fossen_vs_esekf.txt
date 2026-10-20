@@ -1,0 +1,23 @@
+========================================================================================
+  BAO CAO SO SANH 3 DUONG: FOSSEN STANDALONE vs TAU THAT vs ES-EKF (GEO-FOG 3D)
+========================================================================================
+
+1. TONG QUAN:
+   - Thoi gian chay: 1880 s (Lan mat GNSS tu giay 480)
+   - Cam bien: GEO-FOG 3D Dual INS (Khong dung tu ke)
+   - 3 duong danh gia:
+     + Duong 1: Fossen Standalone (Ly tuong, biet truoc vi tri)
+     + Duong 2: Tau that (Chay duoi nuoc, co nhieu cam bien, lai theo ES-EKF)
+     + Duong 3: ES-EKF uoc luong (Thuat toan loc 19 trang thai)
+
+2. KET QUA HIEN CHUAN TRUC TUYEN:
+   - Boresight Roll : Uoc =  1.694 deg | That =  1.500 deg | Sai so =  0.194 deg
+   - Boresight Pitch: Uoc = -1.967 deg | That = -2.000 deg | Sai so =  0.033 deg
+   - Boresight Yaw  : Uoc =  3.025 deg | That =  3.000 deg | Sai so =  0.025 deg
+   - Scale Factor   : Uoc =  1.503 %   | That =  1.500 %   | Sai so =  0.003 %
+
+3. SAI SO VI TRI VA VAN TOC CUOI CUNG:
+   - Sai so vi tri 3D noi bo (Tau that - ES-EKF): 0.2454 m
+   - Do lech vi tri 3D (Tau that - Fossen ly tuong) : 0.4480 m
+   - Sai so van toc 3D noi bo (Tau that - ES-EKF): 0.0016 m/s
+========================================================================================
