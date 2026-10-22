@@ -1,0 +1,7 @@
+Đã chỉnh sửa theo đề xuất của P.TGĐ Duy
+
+- Sửa phần 1.3.1: Thêm tranh ảnh mô tả về lý thuyết sáng chế thân vỏ
+      *các sáng chế không nêu cụ thể tính toán hình học, chỉ đề cập đến các lý thuyết vật lý nên không có các con số cụ thể
+       có thể tham khảo thêm tại các tài liệu đính kèm
+
+- Sửa phần 5.4: Thêm phần giải thích chi tiết và thuyết minh sản phẩm thùng đựng thiết bị bằng con số cụ thể

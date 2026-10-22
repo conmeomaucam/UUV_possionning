@@ -137,9 +137,30 @@ imu_state = GEO_FOG_3D('init', ins_spec, bg_true, ba_true);
 
 ui_curr = [0; 0; n_p];
 
+%% 4.5. KHỞI TẠO TÀU FOSSEN STANDALONE LÝ TƯỞNG (CHẠY SONG SONG)
+fossen_file = fullfile(test_dir, 'ket_qua_fossen_standalone.mat');
+has_fossen_standalone = false;
+if exist(fossen_file, 'file') == 2
+    try
+        fd = load(fossen_file);
+        if isfield(fd, 'pos_history') && size(fd.pos_history, 1) == nTimeSteps
+            pos_fossen_h = fd.pos_history;
+            has_fossen_standalone = true;
+        end
+    catch
+    end
+end
+if ~has_fossen_standalone
+    x_fossen = [U; zeros(5,1); xn; yn; zn; phi; theta; psi];
+    theta_int_f = 0; theta_d_f = 0; q_d_f = 0;
+    psi_d_f = psi; r_d_f = 0;
+    ui_f = [0; 0; n_p];
+end
+
 %% 5. THIẾT LẬP GIAO DIỆN LIVE COCKPIT ĐẲNG CẤP
 fig = figure('Name', 'REMUS 100 + ES-EKF 19-State Live Mission Cockpit', ...
     'Color', [0.06 0.08 0.12], 'Position', [60, 50, 1380, 840]);
+rotate3d(fig, 'on'); % BẬT CHẾ ĐỘ XOAY 3D: Giữ chuột trái kéo để xoay 360 độ bất kỳ lúc nào
 
 % Font và màu sắc HUD
 c_bg = [0.08 0.11 0.16];
@@ -152,17 +173,35 @@ c_gray = [0.6 0.65 0.75];
 % Subplot 1: 3D Trajectory Map (Mặt phẳng 3D biển)
 ax1 = subplot(2, 2, 1);
 set(ax1, 'Color', c_bg, 'XColor', c_gray, 'YColor', c_gray, 'ZColor', c_gray, 'GridColor', [0.2 0.3 0.4]);
-hold(ax1, 'on'); grid(ax1, 'on'); view(ax1, 3);
+hold(ax1, 'on'); grid(ax1, 'on');
+
+% Đặt góc nhìn chéo từ trên nhìn xuống cực rõ
+view(ax1, [-45, 22]);
+
+% KÉO GIÃN TRỤC Z: Vì bơi dài 3000m mà lặn chỉ 100m (chênh 30 lần),
+% dùng pbaspect để nâng trục Z lên bằng 40% chiều ngang, thấy rõ từng mét lặn xuống!
+pbaspect(ax1, [2.2, 1.0, 0.9]);
+xlim(ax1, [-100, 3100]);
+ylim(ax1, [-150, 450]);
+zlim(ax1, [-10, 125]);
+set(ax1, 'ZDir', 'reverse'); % Trục Z hướng xuống đáy biển
+
+% Vẽ bóng đáy biển ở Z = 120m để dễ nhận biết tọa độ mặt phẳng ngang
+plot3(ax1, wpt.pos.y, wpt.pos.x, 120*ones(size(wpt.pos.z)), ':', 'Color', [0.2 0.25 0.35], 'LineWidth', 1);
+h_shadow = animatedline(ax1, 'Color', [0.15 0.35 0.45], 'LineWidth', 1.0, 'LineStyle', ':', 'DisplayName', 'Bóng đáy biển (Z=120m)');
+
 plot3(ax1, wpt.pos.y, wpt.pos.x, wpt.pos.z, 'o--', 'Color', c_yellow, 'LineWidth', 1.5, ...
     'MarkerSize', 7, 'MarkerFaceColor', [0.8 0.5 0], 'DisplayName', 'Waypoints kế hoạch');
-h_line_true3d = animatedline(ax1, 'Color', c_cyan, 'LineWidth', 2.2, 'DisplayName', 'Tàu thật (Ground Truth)');
-h_line_est3d  = animatedline(ax1, 'Color', c_mag, 'LineWidth', 1.6, 'LineStyle', '--', 'DisplayName', 'ES-EKF ước lượng');
-h_auv_pos = plot3(ax1, 0, 0, 0, 'p', 'Color', [1 1 1], 'MarkerFaceColor', c_cyan, 'MarkerSize', 12, 'DisplayName', 'REMUS 100');
+h_line_fossen3d = animatedline(ax1, 'Color', [0.2 0.6 1.0], 'LineWidth', 2.0, 'LineStyle', ':', 'DisplayName', '1. Fossen Thuần (Lý tưởng)');
+h_line_true3d = animatedline(ax1, 'Color', c_cyan, 'LineWidth', 2.2, 'DisplayName', '2. Tàu thật (Có ES-EKF lái)');
+h_line_est3d  = animatedline(ax1, 'Color', c_mag, 'LineWidth', 1.6, 'LineStyle', '--', 'DisplayName', '3. ES-EKF ước lượng');
+h_fossen_pos = plot3(ax1, 0, 0, 0, 'd', 'Color', [1 1 1], 'MarkerFaceColor', [0.2 0.6 1.0], 'MarkerSize', 8, 'DisplayName', 'Tàu Fossen chuẩn');
+h_auv_pos = plot3(ax1, 0, 0, 0, 'p', 'Color', [1 1 1], 'MarkerFaceColor', c_cyan, 'MarkerSize', 12, 'DisplayName', 'REMUS 100 (Thật)');
+
 xlabel(ax1, 'East (m)', 'Color', c_gray, 'FontWeight', 'bold');
 ylabel(ax1, 'North (m)', 'Color', c_gray, 'FontWeight', 'bold');
-zlabel(ax1, 'Depth (m)', 'Color', c_gray, 'FontWeight', 'bold');
-set(ax1, 'ZDir', 'reverse'); % Trục Z hướng xuống đáy biển
-title(ax1, 'QUỸ ĐẠO BƠI 3D NGOÀI BIỂN (EAST - NORTH - DEPTH)', 'Color', [1 1 1], 'FontSize', 11, 'FontWeight', 'bold');
+zlabel(ax1, 'Depth (m) [Trục lặn Z]', 'Color', [1 0.8 0.4], 'FontWeight', 'bold');
+title(ax1, 'QUỸ ĐẠO BƠI 3D (KÉO CHUỘT TRÁI ĐỂ XOAY 360°)', 'Color', [1 1 1], 'FontSize', 11, 'FontWeight', 'bold');
 legend(ax1, 'TextColor', [0.9 0.9 0.9], 'Color', [0.1 0.13 0.2], 'Location', 'northwest');
 
 % Subplot 2: Depth Profile (Đồ thị lặn sâu)
@@ -170,6 +209,7 @@ ax2 = subplot(2, 2, 2);
 set(ax2, 'Color', c_bg, 'XColor', c_gray, 'YColor', c_gray, 'GridColor', [0.2 0.3 0.4]);
 hold(ax2, 'on'); grid(ax2, 'on');
 xline(ax2, T_gnss_cut, ':', 'Color', [1 0.3 0.3], 'LineWidth', 1.8, 'DisplayName', 'Cắt GNSS (Lặn sâu)');
+h_depth_fossen = animatedline(ax2, 'Color', [0.2 0.6 1.0], 'LineWidth', 1.8, 'LineStyle', ':', 'DisplayName', 'Fossen thuần z');
 h_depth_true = animatedline(ax2, 'Color', c_cyan, 'LineWidth', 2.0, 'DisplayName', 'Độ sâu thật z');
 h_depth_est  = animatedline(ax2, 'Color', c_mag, 'LineWidth', 1.5, 'LineStyle', '--', 'DisplayName', 'ES-EKF z');
 xlabel(ax2, 'Thời gian (giây)', 'Color', c_gray, 'FontWeight', 'bold');
@@ -322,13 +362,39 @@ for i = 1:nTimeSteps
     theta_int = theta_int + h * ssa(theta_hat - theta_d);
     ui_curr = ui;
 
+    % 6.5.5. Cập nhật vị trí Fossen Standalone lý tưởng
+    if has_fossen_standalone
+        xf_n = pos_fossen_h(i, 1);
+        xf_e = pos_fossen_h(i, 2);
+        xf_d = pos_fossen_h(i, 3);
+    else
+        [psi_rf, theta_rf] = ALOS3D(x_fossen(7), x_fossen(8), x_fossen(9), ...
+            Delta_h, Delta_v, gamma_h, gamma_v, M_theta, h, R_switch, wpt);
+        [theta_d_f, q_d_f] = LOSobserver(theta_d_f, q_d_f, theta_rf, h, K_f);
+        [psi_d_f, r_d_f]   = LOSobserver(psi_d_f, r_d_f, psi_rf, h, K_f);
+        r_d_f = sat(r_d_f, r_max);
+        delta_r_f = integralSMCheading(x_fossen(12), x_fossen(6), psi_d_f, r_d_f, a_d, ...
+            K_d, K_sigma, 1, phi_b, K_yaw, T_yaw, h);
+        delta_r_f = sat(delta_r_f, delta_max);
+        delta_s_f = -Kp_theta * ssa(x_fossen(11) - theta_d_f) - Kd_theta * x_fossen(5) - Ki_theta * theta_int_f;
+        delta_s_f = sat(delta_s_f, delta_max);
+        ui_f = [delta_r_f; -delta_s_f; n_p];
+        x_fossen = rk4(@remus100, h, x_fossen, ui_f, Vc, betaVc, wc);
+        theta_int_f = theta_int_f + h * ssa(x_fossen(11) - theta_d_f);
+        xf_n = x_fossen(7); xf_e = x_fossen(8); xf_d = x_fossen(9);
+    end
+
     % 6.6. CẬP NHẬT GIAO DIỆN LIVE THEO TẦN SUẤT FRAME_SKIP
     if mod(i, frame_skip) == 0 || i == nTimeSteps
         % Thêm điểm vào Animated Line
+        addpoints(h_line_fossen3d, xf_e, xf_n, xf_d);
+        set(h_fossen_pos, 'XData', xf_e, 'YData', xf_n, 'ZData', xf_d);
         addpoints(h_line_true3d, yn, xn, zn);
         addpoints(h_line_est3d, p_hat(2), p_hat(1), p_hat(3));
+        addpoints(h_shadow, yn, xn, 120);
         set(h_auv_pos, 'XData', yn, 'YData', xn, 'ZData', zn);
 
+        addpoints(h_depth_fossen, t(i), xf_d);
         addpoints(h_depth_true, t(i), zn);
         addpoints(h_depth_est, t(i), p_hat(3));
 
@@ -337,6 +403,7 @@ for i = 1:nTimeSteps
 
         % Tính toán sai số vị trí tức thời
         pos_err_curr = norm([xn - p_hat(1); yn - p_hat(2); zn - p_hat(3)]);
+        diff_fossen  = norm([xn - xf_n; yn - xf_e; zn - xf_d]);
         
         % Chế độ định vị
         if t(i) <= T_gnss_cut
@@ -354,9 +421,12 @@ for i = 1:nTimeSteps
                 floor(t(i)/60), mod(floor(t(i)), 60), speed_multiplier);
             sprintf('  CHẾ ĐỘ ĐỊNH VỊ     : %s', mode_str);
             sprintf('------------------------------------------------------------');
-            sprintf('  VỊ TRÍ THỰC TẾ     : N=%7.1f m | E=%7.1f m | Z=%5.1f m', xn, yn, zn);
-            sprintf('  ES-EKF ƯỚC LƯỢNG   : N=%7.1f m | E=%7.1f m | Z=%5.1f m', p_hat(1), p_hat(2), p_hat(3));
-            sprintf('  SAI SỐ VỊ TRÍ 3D   : >> %5.2f mét << (Rất nhỏ!)', pos_err_curr);
+            sprintf('  [1] FOSSEN LÝ TƯỞNG: N=%7.1f m | E=%7.1f m | Z=%5.1f m', xf_n, xf_e, xf_d);
+            sprintf('  [2] TÀU THẬT REMUS : N=%7.1f m | E=%7.1f m | Z=%5.1f m', xn, yn, zn);
+            sprintf('  [3] ES-EKF ƯỚC LƯỢNG: N=%7.1f m | E=%7.1f m | Z=%5.1f m', p_hat(1), p_hat(2), p_hat(3));
+            sprintf('  ----------------------------------------------------------');
+            sprintf('  SAI SỐ NỘI BỘ (EKF): >> %5.2f mét << (Tàu thật - EKF)', pos_err_curr);
+            sprintf('  ĐỘ LỆCH VỚI FOSSEN : >> %5.2f mét << (Tàu thật - Lý tưởng)', diff_fossen);
             sprintf('------------------------------------------------------------');
             sprintf('  TỐC ĐỘ DI CHUYỂN   : %5.2f m/s (~3.0 hải lý/h)', norm(v_body));
             sprintf('  HƯỚNG BƠI (YAW)    : %6.1f deg (Thực) | %6.1f deg (EKF)', rad2deg(psi), rad2deg(psi_hat));

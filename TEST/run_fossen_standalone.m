@@ -111,6 +111,14 @@ rates_history = zeros(nTimeSteps, 3);    % [p, q, r] (rad/s)
 euler_history = zeros(nTimeSteps, 3);    % [phi, theta, psi] (rad)
 ui_history = zeros(nTimeSteps, 3);       % [delta_r, delta_s, n_p]
 alos_history = zeros(nTimeSteps, 4);     % [y_e, z_e, alpha_c_hat, beta_c_hat]
+f_b_ideal = zeros(nTimeSteps, 3);
+w_ib_b_ideal = zeros(nTimeSteps, 3);
+vel_ned_ideal = zeros(nTimeSteps, 3);
+
+gravity = 9.80665;
+w_ie_ned = [0; 0; 7.292115e-5];
+radius_n = 6378137.0; radius_m = 6356752.3;
+tan_lat = tan(deg2rad(20.8)); height = 0;
 
 fprintf('Bắt đầu chạy mô phỏng %d bước thời gian (T_final = %.0f s)...\n', nTimeSteps, T_final);
 tic_sim = tic;
@@ -178,6 +186,23 @@ for i = 1:nTimeSteps
     ui_history(i, :)       = [delta_r, delta_s, n_p];
     alos_history(i, :)     = [y_e, z_e, alpha_c_hat, beta_c_hat];
 
+    % Tính gia tốc và lực riêng động lực học chính xác từ remus100
+    [xdot_true, ~] = remus100(x, ui, Vc, betaVc, wc);
+    v_body = [u; v; w];
+    omega_b = [p; q; r];
+    a_b_true = xdot_true(1:3) + cross(omega_b, v_body);
+    
+    Cbn_true = eul2cbn_local(phi, theta, psi);
+    v_ned_true = Cbn_true * v_body;
+    vel_ned_ideal(i, :) = v_ned_true';
+    
+    w_en_ned = [v_ned_true(2)/(radius_n + height); ...
+               -v_ned_true(1)/(radius_m + height); ...
+               -v_ned_true(2)*tan_lat/(radius_n + height)];
+           
+    f_b_ideal(i, :)    = (a_b_true - Cbn_true' * [0; 0; gravity] + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true))';
+    w_ib_b_ideal(i, :) = (omega_b + Cbn_true' * (w_ie_ned + w_en_ned))';
+
     % Tích phân Runge-Kutta bậc 4 (RK4) mô hình thủy động lực học REMUS 100
     x = rk4(@remus100, h, x, ui, Vc, betaVc, wc);
 
@@ -191,7 +216,8 @@ fprintf('Hoàn thành mô phỏng Fossen Standalone trong %.2f giây.\n', time_e
 %% 5. LƯU KẾT QUẢ RA FILE .MAT
 save_path = fullfile(script_dir, 'ket_qua_fossen_standalone.mat');
 save(save_path, 't', 'pos_history', 'vel_body_history', 'rates_history', ...
-    'euler_history', 'ui_history', 'alos_history', 'wpt', 'h', 'T_final');
+    'euler_history', 'ui_history', 'alos_history', 'wpt', 'h', 'T_final', ...
+    'f_b_ideal', 'w_ib_b_ideal', 'vel_ned_ideal');
 fprintf('Đã lưu dữ liệu mốc đối chứng vào: %s\n', save_path);
 
 %% 6. VẼ VÀ LƯU ĐỒ THỊ QUỸ ĐẠO FOSSEN STANDALONE
@@ -253,4 +279,13 @@ fprintf('Do sau cuoi cung: %.2f m\n', pos_history(end, 3));
 fprintf('Sai so dạt ngang Cross-track cuc dai: %.2f m (Trung binh: %.2f m)\n', max_cross_track, mean_cross_track);
 fprintf('Sai so do sau Vertical-track cuc dai: %.2f m (Trung binh: %.2f m)\n', max_depth_track, mean_depth_track);
 fprintf('=========================================================================\n');
+end
+
+function Cbn = eul2cbn_local(phi, theta, psi)
+cr = cos(phi); sr = sin(phi);
+cp = cos(theta); sp = sin(theta);
+cy = cos(psi); sy = sin(psi);
+Cbn = [cp*cy, sr*sp*cy - cr*sy, cr*sp*cy + sr*sy; ...
+       cp*sy, sr*sp*sy + cr*cy, cr*sp*sy - sr*cy; ...
+       -sp,   sr*cp,            cr*cp];
 end
