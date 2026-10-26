@@ -1,43 +1,104 @@
-function [Z_dvl, dvl_valid, dvl_sim] = DVL_A125(p, dt, measurement_indices, ...
-	velocity_true_ned, position_true, roll_true, pitch_true, yaw_true, ...
-	ins_sim, lever_arm, seabed_depth)
+function varargout = DVL_A125(mode, varargin)
 %DVL_A125  Giả lập cảm biến đo vận tốc Doppler DVL A125 (Water Linked).
 %
-% 1. Nguyên lý mô phỏng:
-%    - Chế độ hoạt động: Bottom-Track (Bám đáy lòng hồ).
-%    - Đầu ra: Vận tốc 3 trục [vx, vy, vz] trong hệ tọa độ đầu đo DVL (Sensor Frame).
-%    - Bù hiệu ứng cánh tay đòn (Lever-Arm) do khoảng cách lệch tâm giữa IMU và DVL:
-%      v_lever = v_body + cross(body_rate, lever_arm)
-%    - Kiểm tra điều kiện bắt đáy (Bottom-lock):
-%      + Độ cao cách đáy: 0.05 m <= altitude <= 125.0 m
-%      + Vận tốc tối đa: norm(v_lever) <= 9.0 m/s
-%    - Áp sai số lệch trục lắp đặt cơ khí (Boresight) và sai số hệ số tỉ lệ (Scale factor):
-%      ideal = (1 + s_true) * C_b^s * v_lever
-%    - Mô hình nhiễu đo:
-%      + Nhiễu trắng từng ping (mô phỏng chỉ số FOM): sigma = san + ti_le * |v|
-%      + Sai số tương quan chậm Gauss-Markov (thời hằng tau = 300s)
+% 1. NGUYÊN LÝ MÔ PHỎNG:
+%    - Chế độ hoạt động: Bottom-Track (Bám đáy) trong hệ tọa độ đầu đo DVL (Sensor Frame).
+%    - Bù hiệu ứng cánh tay đòn (Lever-Arm) do vị trí lắp lệch tâm giữa IMU và DVL:
+%        v_lever = v_body + cross(omega_b, lever_arm)
+%    - Áp sai số lệch trục lắp đặt cơ khí (Boresight) và sai số hệ số tỉ lệ (Scale Factor):
+%        v_dvl_ideal = (1.0 + true_scale) * Cbs_true * v_lever
+%    - Mô hình nhiễu đo theo datasheet Water Linked DVL A125:
+%        sigma = noise_floor + noise_slope * norm(v_lever)
+%        dvl_meas = v_dvl_ideal + sigma * randn(3, 1)
 %
-% 2. Đầu vào:
-%    - p                   : Struct thông số hệ thống chuẩn (từ thong_so_he_thong_chuan).
-%    - dt                  : Chu kỳ lấy mẫu cơ bản (giây).
-%    - measurement_indices : Mảng chỉ số các thời điểm phát xung của DVL.
-%    - velocity_true_ned   : Vận tốc chuẩn hệ NED (N x 3, m/s).
-%    - position_true       : Tọa độ vị trí chuẩn hệ NED (N x 3, m).
-%    - roll_true, pitch_true, yaw_true: Góc tư thế chuẩn của UUV (N x 1, rad).
-%    - ins_sim             : Struct kết quả từ INS_FI (chứa w_ib_true, w_ie, w_en).
-%    - lever_arm           : Vector cánh tay đòn [lx; ly; lz] (m, khung thân).
-%    - seabed_depth        : Độ sâu đáy hồ (m, tùy chọn, mặc định 50m).
+% 2. CÁCH GỌI MÔ-ĐUN:
+%    spec = DVL_A125('spec');                                  % Lấy thông số kỹ thuật chuẩn DVL A125
+%    [dvl_meas, v_lever, sigma] = DVL_A125('step', ...         % Giả lập 1 bước đo DVL (chu kỳ 5 Hz)
+%        v_body, omega_b, lever_arm, true_scale, Cbs_true, spec);
 %
-% 3. Đầu ra:
-%    - Z_dvl               : Ma trận vận tốc đo (N_meas x 3, m/s) trong hệ đầu đo DVL.
-%    - dvl_valid           : Vector logic báo trạng thái bám đáy (N_meas x 1).
-%    - dvl_sim             : Struct chứa các biến phục vụ đánh giá và nghiệm thu:
-%                            .velocity_dvl_lever_true : Vận tốc thật tại tâm DVL (N_meas x 3)
-%                            .s_true                  : Hệ số scale thật đưa vào
-%                            .boresight_true          : Góc boresight thật đưa vào (rad)
-%                            .Cbs_true                : Ma trận xoay lệch trục thật
-%                            .sigma_dvl               : Function handle tính độ lệch chuẩn nhiễu
-%                            .altitude                : Mảng độ cao cách đáy (N_meas x 1)
+%    (Hỗ trợ truyền trực tiếp noise_floor và noise_slope):
+%    dvl_meas = DVL_A125('step', v_body, omega_b, lever_arm, true_scale, Cbs_true, noise_floor, noise_slope);
+%
+% 3. CHẾ ĐỘ BATCH CŨ (Tương thích ngược):
+%    [Z_dvl, dvl_valid, dvl_sim] = DVL_A125(p, dt, measurement_indices, ...);
+
+if nargin == 0
+    mode = 'spec';
+end
+
+% Kiểm tra tương thích nếu gọi theo kiểu struct batch cũ
+if ~ischar(mode) && ~isstring(mode)
+    [varargout{1}, varargout{2}, varargout{3}] = dvl_batch_legacy(mode, varargin{:});
+    return;
+end
+
+switch lower(char(mode))
+    case 'spec'
+        varargout{1} = build_spec();
+    case {'step', 'measure'}
+        [varargout{1}, varargout{2}, varargout{3}] = dvl_step_measurement(varargin{:});
+    otherwise
+        error('DVL_A125: mode khong hop le: %s. Chon ''spec'' hoac ''step''.', mode);
+end
+
+end
+
+%% ===================== THÔNG SỐ KỸ THUẬT DVL A125 =====================
+function s = build_spec()
+s.ten = 'Water Linked DVL A125';
+s.tan_so_hz = 5;                       % Tần số cập nhật danh định (Hz)
+s.noise_floor = 0.01;                  % Nhiễu sàn vận tốc danh định (m/s)
+s.noise_slope = 0.005;                 % Nhiễu tỉ lệ vận tốc (0.5% vận tốc)
+s.van_toc_toi_da = 9.0;                % Vận tốc đo tối đa (m/s, ~17.5 knots)
+s.do_cao_min = 0.05;                   % Tầm bám đáy tối thiểu (m)
+s.do_cao_max = 125.0;                  % Tầm bám đáy tối đa (m)
+s.do_phan_giai = 0.001;                % Độ phân giải vận tốc (1 mm/s)
+s.gm_tau_s = 300.0;                    % Thời hằng trôi chậm Gauss-Markov (s)
+s.gm_ti_le_sigma = 0.001;              % Tỉ lệ nhiễu Gauss-Markov
+end
+
+%% ===================== GIẢ LẬP BƯỚC ĐO ONLINE (STEP) =====================
+function [dvl_meas, v_lever, sigma_dvl] = dvl_step_measurement( ...
+    v_body, omega_b, lever_arm, true_scale, Cbs_true, spec_or_floor, slope_in)
+
+v_body = v_body(:);
+omega_b = omega_b(:);
+lever_arm = lever_arm(:);
+
+% 1. Vận tốc tại vị trí lắp đặt đầu đo DVL (bù vận tốc góc và cánh tay đòn)
+v_lever = v_body + cross(omega_b, lever_arm);
+
+% 2. Vận tốc lý tưởng sau khi chiếu vào hệ tọa độ DVL (kèm sai số Boresight và Scale factor thật)
+v_dvl_ideal = (1.0 + true_scale) * (Cbs_true * v_lever);
+
+% 3. Độ lệch chuẩn nhiễu đo theo datasheet DVL A125
+if nargin >= 6 && isstruct(spec_or_floor)
+    noise_floor = spec_or_floor.noise_floor;
+    noise_slope = spec_or_floor.noise_slope;
+elseif nargin >= 6 && isnumeric(spec_or_floor)
+    noise_floor = spec_or_floor;
+    if nargin >= 7 && ~isempty(slope_in)
+        noise_slope = slope_in;
+    else
+        noise_slope = 0.005;
+    end
+else
+    noise_floor = 0.01;
+    noise_slope = 0.005;
+end
+
+speed_lever = norm(v_lever);
+sigma_dvl = noise_floor + noise_slope * speed_lever;
+
+% 4. Sinh số đo vận tốc 3 trục trong hệ DVL có nhiễu Gaussian
+dvl_meas = v_dvl_ideal + sigma_dvl * randn(3, 1);
+
+end
+
+%% ===================== HÀM BATCH TƯƠNG THÍCH CŨ =====================
+function [Z_dvl, dvl_valid, dvl_sim] = dvl_batch_legacy(p, dt, measurement_indices, ...
+	velocity_true_ned, position_true, roll_true, pitch_true, yaw_true, ...
+	ins_sim, lever_arm, seabed_depth)
 
 if nargin < 10 || isempty(lever_arm)
 	lever_arm = [0.2; 0; -0.1];
@@ -51,7 +112,7 @@ measurement_step = measurement_indices(2) - measurement_indices(1);
 
 s_true = p.si.k_that;
 boresight_true = p.si.boresight_that_rad;
-Cbs_true = eye(3) - skew_mat(boresight_true);
+Cbs_true = eye(3) - skew_mat_local(boresight_true);
 sigma_dvl = p.si.sigma_dvl_ping_fn;
 
 dt_dvl = measurement_step * dt;
@@ -69,13 +130,12 @@ w_en = ins_sim.w_en;
 
 for k = 1:n_measurements
 	i = measurement_indices(k);
-	Cnb_true = body_to_nav(roll_true(i), pitch_true(i), yaw_true(i))';
+	Cnb_true = body_to_nav_local(roll_true(i), pitch_true(i), yaw_true(i))';
 	velocity_body = Cnb_true * velocity_true_ned(i, :)';
 	body_rate = w_ib_true(i, :)' - Cnb_true * (w_ie + w_en(i, :)');
 	velocity_lever = velocity_body + cross(body_rate, lever_arm);
 	velocity_dvl_lever_true(k, :) = velocity_lever';
 
-	% Tính độ cao cách đáy (hỗ trợ hàm nội suy hồ Hòa Bình nếu có)
 	if isfield(p, 'env') && isfield(p.env, 'ham_noi_suy_do_sau') && ~isempty(p.env.ham_noi_suy_do_sau)
 		d_bed = p.env.ham_noi_suy_do_sau(position_true(i, 1), position_true(i, 2));
 		if isnan(d_bed)
@@ -87,21 +147,18 @@ for k = 1:n_measurements
 	altitude = d_bed - position_true(i, 3);
 	altitude_history(k) = altitude;
 
-	% Kiểm tra ngưỡng bám đáy của DVL A125
 	dvl_valid(k) = norm(velocity_lever) <= p.dvl.van_toc_toi_da_mps && ...
 		altitude >= p.dvl.do_cao_min_m && altitude <= p.dvl.do_cao_max_m;
 	if ~dvl_valid(k)
 		continue;
 	end
 
-	% Mô hình sai số: trôi chậm Gauss-Markov + lệch Boresight + Scale + nhiễu từng ping
 	dvl_gm = phi_dvl * dvl_gm + p.dvl.gm_ti_le_sigma * sqrt(1 - phi_dvl^2) * randn(3, 1);
 	ideal = (1 + s_true) * Cbs_true * velocity_lever;
 	white = sigma_dvl(norm(velocity_lever)) * randn(3, 1);
 	Z_dvl(k, :) = (ideal + dvl_gm .* ideal + white)';
 end
 
-% Đóng gói struct phục vụ đánh giá nghiệm thu
 dvl_sim = struct();
 dvl_sim.velocity_dvl_lever_true = velocity_dvl_lever_true;
 dvl_sim.s_true = s_true;
@@ -113,8 +170,7 @@ dvl_sim.dt_dvl = dt_dvl;
 
 end
 
-function Cbn = body_to_nav(roll, pitch, yaw)
-%BODY_TO_NAV  Chuyển đổi góc Euler (Roll, Pitch, Yaw) sang ma trận xoay Cbn
+function Cbn = body_to_nav_local(roll, pitch, yaw)
 cr = cos(roll);  sr = sin(roll);
 cp = cos(pitch); sp = sin(pitch);
 cy = cos(yaw);   sy = sin(yaw);
@@ -124,8 +180,7 @@ Cbn = [cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr; ...
 	-sp,   cp*sr,             cp*cr];
 end
 
-function S = skew_mat(v)
-%SKEW_MAT  Tạo ma trận phản đối xứng 3x3
+function S = skew_mat_local(v)
 v = v(:);
 S = [0, -v(3), v(2); ...
 	v(3), 0, -v(1); ...

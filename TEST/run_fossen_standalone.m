@@ -22,6 +22,7 @@ if ~exist(fullfile(project_root, 'AUV_simulation'), 'dir')
 end
 mss_dir = fullfile(project_root, 'AUV_simulation', 'MSS');
 
+addpath(fullfile(project_root, 'algo'));
 addpath(fullfile(mss_dir, 'GNC'));
 addpath(fullfile(mss_dir, 'LIBRARY'));
 addpath(fullfile(mss_dir, 'CRAFT', 'AUV'));
@@ -115,10 +116,11 @@ f_b_ideal = zeros(nTimeSteps, 3);
 w_ib_b_ideal = zeros(nTimeSteps, 3);
 vel_ned_ideal = zeros(nTimeSteps, 3);
 
-gravity = 9.80665;
+lat_rad = deg2rad(20.8);
+tan_lat = tan(lat_rad); height = 0;
+gravity = gravity_fossen(lat_rad, height); % Tính trọng lực chuẩn theo vĩ độ WGS-84 Somigliana
 w_ie_ned = [0; 0; 7.292115e-5];
 radius_n = 6378137.0; radius_m = 6356752.3;
-tan_lat = tan(deg2rad(20.8)); height = 0;
 
 fprintf('Bắt đầu chạy mô phỏng %d bước thời gian (T_final = %.0f s)...\n', nTimeSteps, T_final);
 tic_sim = tic;
@@ -200,7 +202,8 @@ for i = 1:nTimeSteps
                -v_ned_true(1)/(radius_m + height); ...
                -v_ned_true(2)*tan_lat/(radius_n + height)];
            
-    f_b_ideal(i, :)    = (a_b_true - Cbn_true' * [0; 0; gravity] + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true))';
+    [g_curr, g_ned_curr] = gravity_fossen(lat_rad, zn);
+    f_b_ideal(i, :)    = (a_b_true - Cbn_true' * g_ned_curr + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true))';
     w_ib_b_ideal(i, :) = (omega_b + Cbn_true' * (w_ie_ned + w_en_ned))';
 
     % Tích phân Runge-Kutta bậc 4 (RK4) mô hình thủy động lực học REMUS 100

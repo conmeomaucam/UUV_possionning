@@ -68,14 +68,14 @@ wpt.pos.x = [wpt_surface_x, wpt_mission_x];
 wpt.pos.y = [wpt_surface_y, wpt_mission_y];
 wpt.pos.z = [wpt_surface_z, wpt_mission_z];
 
-% Hằng số vật lý và định vị
-gravity = 9.80665;
-w_ie_ned = [0; 0; 7.292115e-5];
-radius_n = 6378137.0;
-radius_m = 6356752.3;
+% Hằng số vật lý và định vị WGS-84
 lat_rad = deg2rad(20.8);
 tan_lat = tan(lat_rad);
 height = 0;
+gravity = gravity_fossen(lat_rad, height); % Tính trọng lực chuẩn theo vĩ độ WGS-84 Somigliana
+w_ie_ned = [0; 0; 7.292115e-5];
+radius_n = 6378137.0;
+radius_m = 6356752.3;
 
 % Cánh tay đòn lắp đặt từ IMU đến DVL (khung thân tàu, đơn vị m)
 lever_arm = [0.5; -0.1; 0.2];
@@ -108,8 +108,9 @@ sigma_gps_pos = ins_spec.gnss.pos_v;       % Sai số vị trí GNSS RTK dùng t
 sigma_gps_vel = ins_spec.gnss.vel;         % Sai số vận tốc GNSS (m/s)
 sigma_gps_yaw = ins_spec.gnss.heading;     % Sai số góc hướng GNSS 2 ăng-ten (rad)
 sigma_depth = 0.05;           % Sai số cảm biến độ sâu (m)
-dvl_noise_floor = 0.01;       % Nhiễu sàn DVL A125 (m/s)
-dvl_noise_slope = 0.005;      % Nhiễu tỉ lệ vận tốc DVL
+dvl_spec = DVL_A125('spec');
+dvl_noise_floor = dvl_spec.noise_floor;       % Nhiễu sàn DVL A125 (m/s)
+dvl_noise_slope = dvl_spec.noise_slope;      % Nhiễu tỉ lệ vận tốc DVL
 
 % Vector cấu hình 20 phần tử truyền cho esekf19_step
 cfg = zeros(20, 1);
@@ -131,7 +132,7 @@ cfg(19) = acc_bias_tau;
 cfg(20) = sigma_arw;
 
 noise_cfg = [sigma_vrw; sigma_arw; acc_bias_sigma; acc_bias_tau; ...
-             gyro_bias_rw; scale_rw; boresight_rw; h];
+    gyro_bias_rw; scale_rw; boresight_rw; h];
 
 %% 2. KHỞI TẠO BỘ ĐIỀU KHIỂN VÀ THỦY ĐỘNG LỰC HỌC REMUS 100
 xn = 0; yn = 0; zn = 0;
@@ -246,10 +247,12 @@ for i = 1:nTimeSteps
     a_b_true = xdot_true(1:3) + cross(omega_b, v_body);
 
     w_en_ned = [v_ned_true(2)/(radius_n + height); ...
-               -v_ned_true(1)/(radius_m + height); ...
-               -v_ned_true(2)*tan_lat/(radius_n + height)];
+        -v_ned_true(1)/(radius_m + height); ...
+        -v_ned_true(2)*tan_lat/(radius_n + height)];
 
-    f_b_true = a_b_true - Cbn_true' * [0; 0; gravity] + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true);
+    % Trọng lực chuẩn theo vĩ độ và độ sâu tức thời qua algo/gravity_fossen.m
+    [g_curr, g_ned_curr] = gravity_fossen(lat_rad, zn);
+    f_b_true = a_b_true - Cbn_true' * g_ned_curr + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true);
     w_ib_b_true = omega_b + Cbn_true' * (w_ie_ned + w_en_ned);
 
     % Sinh số đo IMU theo datasheet (bias bật máy + in-run Gauss-Markov + ARW/VRW)
@@ -268,11 +271,8 @@ for i = 1:nTimeSteps
         depth_meas = zn + sigma_depth * randn;
         flags(2) = 1;
 
-        % Cảm biến DVL A125 có cánh tay đòn và sai số hiệu chuẩn
-        v_lever = v_body + cross(omega_b, lever_arm);
-        v_dvl_ideal = (1.0 + true_scale) * Cbs_true * v_lever;
-        sigma_dvl_i = dvl_noise_floor + dvl_noise_slope * norm(v_lever);
-        dvl_meas = v_dvl_ideal + sigma_dvl_i * randn(3, 1);
+        % Cảm biến DVL A125 gọi qua module Sensor/DVL_A125
+        dvl_meas = DVL_A125('step', v_body, omega_b, lever_arm, true_scale, Cbs_true, dvl_spec);
         flags(3) = 1;
 
         % GNSS RTK ở mặt nước (chỉ có khi t <= T_gnss_cut)
@@ -283,6 +283,7 @@ for i = 1:nTimeSteps
     end
 
     % 4.4. Thực hiện 1 bước lọc ES-EKF 19 trạng thái
+    cfg(2) = g_curr; % Cập nhật trọng lực theo độ sâu cho bộ lọc
     [state_est, P_est, update_status, nis] = esekf19_step( ...
         state_est, P_est, Q, gyro_meas, accel_meas, ...
         gnss_meas, depth_meas, dvl_meas, flags, cfg);
@@ -501,8 +502,8 @@ cr = cos(phi); sr = sin(phi);
 cp = cos(theta); sp = sin(theta);
 cy = cos(psi); sy = sin(psi);
 Cbn = [cp*cy, sr*sp*cy - cr*sy, cr*sp*cy + sr*sy; ...
-       cp*sy, sr*sp*sy + cr*cy, cr*sp*sy - sr*cy; ...
-       -sp,   sr*cp,            cr*cp];
+    cp*sy, sr*sp*sy + cr*cy, cr*sp*sy - sr*cy; ...
+    -sp,   sr*cp,            cr*cp];
 end
 
 function [phi, theta, psi] = quat_to_euler_local(q)

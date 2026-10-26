@@ -831,10 +831,11 @@ boresight_rw = 1e-5;
 noise_cfg = [sigma_vrw; sigma_arw; acc_bias_sigma; acc_bias_tau; ...
     gyro_bias_rw; scale_rw; boresight_rw; h];
 
-gravity = 9.80665;
+lat_rad = deg2rad(20.8);
+tan_lat = tan(lat_rad); height = 0;
+gravity = gravity_fossen(lat_rad, height);
 w_ie_ned = [0; 0; 7.292115e-5];
 radius_n = 6378137.0; radius_m = 6356752.3;
-tan_lat = tan(deg2rad(20.8)); height = 0;
 lever_arm = [0.5; -0.1; 0.2] + 0.005 * randn(3, 1);
 
 cfg = zeros(21, 1);
@@ -951,7 +952,8 @@ for k = 1:nSteps
         -v_ned_true(1)/(radius_m + height); ...
         -v_ned_true(2)*tan_lat/(radius_n + height)];
 
-    f_b_true = a_b_true - Cbn_true' * [0; 0; gravity] + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true);
+    [g_curr, g_ned_curr] = gravity_fossen(lat_rad, zn);
+    f_b_true = a_b_true - Cbn_true' * g_ned_curr + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true);
     w_ib_b_true = omega_b + Cbn_true' * (w_ie_ned + w_en_ned);
 
     % Sinh số đo IMU GEO-FOG 3D
@@ -997,6 +999,7 @@ for k = 1:nSteps
     end
 
     % Bước lọc ES-EKF
+    cfg_k(2) = g_curr;
     [state_est, P_est, update_status, nis] = esekf19_step( ...
         state_est, P_est, Q, gyro_meas, accel_meas, ...
         gnss_meas, depth_meas, dvl_meas, flags, cfg_k);

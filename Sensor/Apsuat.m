@@ -27,24 +27,45 @@ function [Z_depth, depth_sim] = Apsuat(p, measurement_indices, position_true, si
 %                            .rho_water    : Mật độ nước (kg/m^3)
 %                            .sigma_depth  : Độ lệch chuẩn sai số (m)
 
+% Đảm bảo thư mục algo có trong path để gọi gravity_fossen
+if ~exist('gravity_fossen', 'file')
+	root_dir = fileparts(fileparts(mfilename('fullpath')));
+	if exist(fullfile(root_dir, 'algo'), 'dir')
+		addpath(fullfile(root_dir, 'algo'));
+	end
+end
+
 % Giá trị mặc định nếu chạy thử hoặc thiếu tham số
 if nargin < 1 || isempty(p)
 	p = struct();
-	p.dat.g = 9.80665;
-	p.env.khoi_luong_rieng_kg_m3 = 997.8;
+	p.lat_rad = deg2rad(20.8);
+	p.dat.g = gravity_fossen(p.lat_rad, 0);
+	p.env.khoi_luong_rieng_kg_m3 = 1025.0;
 end
 if nargin < 4 || isempty(sigma_depth)
 	sigma_depth = 0.05; % Sai số mặc định 5 cm
 end
 
-% Lấy mật độ nước (ưu tiên từ p.env nước ngọt hồ Hòa Bình)
+% Lấy mật độ nước (mặc định nước biển 1025 kg/m^3)
 if isfield(p, 'env') && isfield(p.env, 'khoi_luong_rieng_kg_m3')
 	rho = p.env.khoi_luong_rieng_kg_m3;
 else
-	rho = 997.8; % Mặc định nước ngọt ở 22°C
+	rho = 1025.0; % Mặc định nước biển
 end
 
-g = p.dat.g;
+% Lấy vĩ độ địa lý
+if isfield(p, 'lat_rad') && ~isempty(p.lat_rad)
+	lat_rad = p.lat_rad;
+else
+	lat_rad = deg2rad(20.8);
+end
+
+% Tính gia tốc trọng trường chuẩn qua algo/gravity_fossen.m
+if isfield(p, 'dat') && isfield(p.dat, 'g') && ~isempty(p.dat.g)
+	g = p.dat.g;
+else
+	g = gravity_fossen(lat_rad, 0);
+end
 P_atm_Pa = 101325; % 1 atm chuẩn (Pa)
 
 n_measurements = numel(measurement_indices);

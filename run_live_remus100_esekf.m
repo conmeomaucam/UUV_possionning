@@ -29,9 +29,9 @@ test_dir = fullfile(project_root, 'TEST');
 addpath(algo_dir);
 addpath(test_dir);
 addpath(fullfile(project_root, 'Sensor'));
-addpath(fullfile(project_root, 'dieukiendauvao'));
 addpath(fullfile(mss_dir, 'GNC'));
 addpath(fullfile(mss_dir, 'LIBRARY'));
+addpath(fullfile(mss_dir, 'LIBRARY', 'kinematics'));
 addpath(fullfile(mss_dir, 'CRAFT', 'AUV'));
 addpath(fullfile(mss_dir, 'CRAFT', 'AUV', 'models'));
 
@@ -60,11 +60,11 @@ wpt.pos.x = [wpt_surface_x, wpt_mission_x];
 wpt.pos.y = [wpt_surface_y, wpt_mission_y];
 wpt.pos.z = [wpt_surface_z, wpt_mission_z];
 
-% Hằng số định vị
-gravity = 9.80665;
+% Hằng số định vị và trọng lực chuẩn WGS-84 Somigliana
+lat_rad = deg2rad(20.8); tan_lat = tan(lat_rad); height = 0;
+gravity = gravity_fossen(lat_rad, height);  % Tính qua algo/gravity_fossen.m
 w_ie_ned = [0; 0; 7.292115e-5];
 radius_n = 6378137.0; radius_m = 6356752.3;
-lat_rad = deg2rad(20.8); tan_lat = tan(lat_rad); height = 0;
 lever_arm = [0.5; -0.1; 0.2];
 
 % Sai số lắp đặt DVL thực tế (Ground Truth)
@@ -85,7 +85,8 @@ sigma_gps_pos = ins_spec.gnss.pos_v;
 sigma_gps_vel = ins_spec.gnss.vel;
 sigma_gps_yaw = ins_spec.gnss.heading;
 sigma_depth = 0.05;
-dvl_noise_floor = 0.01; dvl_noise_slope = 0.005;
+dvl_spec = DVL_A125('spec');
+dvl_noise_floor = dvl_spec.noise_floor; dvl_noise_slope = dvl_spec.noise_slope;
 
 cfg = zeros(20, 1);
 cfg(1) = h; cfg(2) = gravity; cfg(3:5) = w_ie_ned;
@@ -95,7 +96,7 @@ cfg(15) = sigma_gps_pos; cfg(16) = sigma_gps_vel; cfg(17) = sigma_gps_yaw;
 cfg(18) = sigma_depth; cfg(19) = acc_bias_tau; cfg(20) = sigma_arw;
 
 noise_cfg = [sigma_vrw; sigma_arw; acc_bias_sigma; acc_bias_tau; ...
-             gyro_bias_rw; scale_rw; boresight_rw; h];
+    gyro_bias_rw; scale_rw; boresight_rw; h];
 
 %% 3. KHỞI TẠO TÀU REMUS 100 VÀ BỘ ĐIỀU KHIỂN
 xn = 0; yn = 0; zn = 0; phi = 0; theta = 0;
@@ -136,6 +137,13 @@ bg_true = [deg2rad(0.2)/3600; -deg2rad(0.15)/3600; deg2rad(0.3)/3600];
 imu_state = GEO_FOG_3D('init', ins_spec, bg_true, ba_true);
 
 ui_curr = [0; 0; n_p];
+
+% Mảng lưu trữ toàn bộ lịch sử để xuất báo cáo thuyết minh lãnh đạo
+pos_true_hist = zeros(nTimeSteps, 3);
+pos_est_hist  = zeros(nTimeSteps, 3);
+bs_hist       = zeros(nTimeSteps, 3);
+scale_hist    = zeros(nTimeSteps, 1);
+
 
 %% 4.5. KHỞI TẠO TÀU FOSSEN STANDALONE LÝ TƯỞNG (CHẠY SONG SONG)
 fossen_file = fullfile(test_dir, 'ket_qua_fossen_standalone.mat');
@@ -271,10 +279,12 @@ for i = 1:nTimeSteps
     a_b_true = xdot_true(1:3) + cross(omega_b, v_body);
 
     w_en_ned = [v_ned_true(2)/(radius_n + height); ...
-               -v_ned_true(1)/(radius_m + height); ...
-               -v_ned_true(2)*tan_lat/(radius_n + height)];
+        -v_ned_true(1)/(radius_m + height); ...
+        -v_ned_true(2)*tan_lat/(radius_n + height)];
 
-    f_b_true = a_b_true - Cbn_true' * [0; 0; gravity] + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true);
+    % Trọng lực chuẩn theo vĩ độ và độ sâu tức thời qua algo/gravity_fossen.m
+    [g_curr, g_ned_curr] = gravity_fossen(lat_rad, zn);
+    f_b_true = a_b_true - Cbn_true' * g_ned_curr + Cbn_true' * cross(2*w_ie_ned + w_en_ned, v_ned_true);
     w_ib_b_true = omega_b + Cbn_true' * (w_ie_ned + w_en_ned);
 
     % Sinh số đo IMU GEO-FOG 3D Dual
@@ -291,10 +301,8 @@ for i = 1:nTimeSteps
         depth_meas = zn + sigma_depth * randn;
         flags(2) = 1;
 
-        v_lever = v_body + cross(omega_b, lever_arm);
-        v_dvl_ideal = (1.0 + true_scale) * Cbs_true * v_lever;
-        sigma_dvl_i = dvl_noise_floor + dvl_noise_slope * norm(v_lever);
-        dvl_meas = v_dvl_ideal + sigma_dvl_i * randn(3, 1);
+        % Cảm biến DVL A125 gọi qua module Sensor/DVL_A125
+        dvl_meas = DVL_A125('step', v_body, omega_b, lever_arm, true_scale, Cbs_true, dvl_spec);
         flags(3) = 1;
 
         if t(i) <= T_gnss_cut
@@ -304,6 +312,7 @@ for i = 1:nTimeSteps
     end
 
     % 6.4. Bước lọc ES-EKF 19 trạng thái
+    cfg(2) = g_curr; % Cập nhật trọng lực theo độ sâu cho bộ lọc
     [state_est, P_est, ~, ~] = esekf19_step( ...
         state_est, P_est, Q, gyro_meas, accel_meas, ...
         gnss_meas, depth_meas, dvl_meas, flags, cfg);
@@ -313,6 +322,13 @@ for i = 1:nTimeSteps
     [phi_hat, theta_hat, psi_hat] = quat_to_euler_local(q_hat);
     scale_hat = state_est(17);
     bs_hat = state_est(18:20);
+
+    % Lưu lịch sử tọa độ và tham số hiệu chuẩn
+    pos_true_hist(i, :) = [xn, yn, zn];
+    pos_est_hist(i, :)  = [p_hat(1), p_hat(2), p_hat(3)];
+    bs_hist(i, :)       = bs_hat';
+    scale_hist(i)       = scale_hat;
+
 
     % 6.5. Dẫn đường ALOS3D và điều khiển khép vòng bằng ước lượng ES-EKF
     [psi_ref, theta_ref, ~, ~, ~, ~] = ...
@@ -404,7 +420,7 @@ for i = 1:nTimeSteps
         % Tính toán sai số vị trí tức thời
         pos_err_curr = norm([xn - p_hat(1); yn - p_hat(2); zn - p_hat(3)]);
         diff_fossen  = norm([xn - xf_n; yn - xf_e; zn - xf_d]);
-        
+
         % Chế độ định vị
         if t(i) <= T_gnss_cut
             mode_str = 'HIỆU CHUẨN MẶT NƯỚC (GNSS RTK 5Hz)';
@@ -418,7 +434,7 @@ for i = 1:nTimeSteps
         hud_lines = {
             sprintf('------------------------------------------------------------');
             sprintf('  THỜI GIAN NHIỆM VỤ : %02d:%02d / 31:20  (Tua %dx)', ...
-                floor(t(i)/60), mod(floor(t(i)), 60), speed_multiplier);
+            floor(t(i)/60), mod(floor(t(i)), 60), speed_multiplier);
             sprintf('  CHẾ ĐỘ ĐỊNH VỊ     : %s', mode_str);
             sprintf('------------------------------------------------------------');
             sprintf('  [1] FOSSEN LÝ TƯỞNG: N=%7.1f m | E=%7.1f m | Z=%5.1f m', xf_n, xf_e, xf_d);
@@ -436,7 +452,7 @@ for i = 1:nTimeSteps
             sprintf('  HIỆU CHUẨN SCALE DVL     : %+5.2f%% (Thật = +1.50%%)', scale_hat * 100);
             sprintf('  DÒNG NƯỚC NGẦM           : %4.2f m/s | Hướng: %5.1f°', Vc, rad2deg(betaVc));
             sprintf('------------------------------------------------------------');
-        };
+            };
         set(hud_text, 'String', strjoin(hud_lines, '\n'));
 
         drawnow limitrate;
@@ -448,6 +464,11 @@ fprintf('\n>>> ĐÃ HOÀN THÀNH TOÀN BỘ HÀNH TRÌNH 31.3 PHÚT TRONG %.1f G
 fprintf('Sai số vị trí cuối cùng sau khi lặn sâu gần 3km: %.2f mét.\n', pos_err_curr);
 fprintf('Boresight Yaw ước lượng được: %.3f° (Thật = 3.000°).\n', rad2deg(bs_hat(3)));
 fprintf('Scale Factor ước lượng được : %.3f%% (Thật = 1.500%%).\n', scale_hat * 100);
+
+%% 7. TỰ ĐỘNG XUẤT BIỂU ĐỒ BÁO CÁO NỀN TRẮNG PHÓNG TO MẶT NƯỚC (TOP-DOWN 2D)
+fprintf('\n>>> ĐANG MỞ BIỂU ĐỒ BÁO CÁO NỀN TRẮNG PHÓNG TO 2D ĐỂ TRÌNH BÀY LÃNH ĐẠO <<<\n');
+plot_quy_dao_mat_nuoc_sep(t, pos_true_hist, pos_est_hist, bs_hist, scale_hist, wpt, true_boresight, true_scale);
+
 end
 
 %% HÀM PHỤ TRỢ CỤC BỘ
@@ -456,8 +477,8 @@ cr = cos(phi); sr = sin(phi);
 cp = cos(theta); sp = sin(theta);
 cy = cos(psi); sy = sin(psi);
 Cbn = [cp*cy, sr*sp*cy - cr*sy, cr*sp*cy + sr*sy; ...
-       cp*sy, sr*sp*sy + cr*cy, cr*sp*sy - sr*cy; ...
-       -sp,   sr*cp,            cr*cp];
+    cp*sy, sr*sp*sy + cr*cy, cr*sp*sy - sr*cy; ...
+    -sp,   sr*cp,            cr*cp];
 end
 
 function [phi, theta, psi] = quat_to_euler_local(q)
