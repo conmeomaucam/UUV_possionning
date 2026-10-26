@@ -131,35 +131,46 @@ update_status = zeros(3, 1);
 nis = zeros(3, 1);
 
 % -------------------------------------------------------------------------
-% 4.1. CẬP NHẬT GNSS (VỊ TRÍ, VẬN TỐC, GÓC HƯỚNG TỪ 2 ĂNG-TEN)
+% 4.1. CẬP NHẬT GNSS (VỊ TRÍ, VẬN TỐC; GÓC HƯỚNG CHỈ KHI CÓ 2 ĂNG-TEN)
 % -------------------------------------------------------------------------
+% Quy ước: gnss_meas(7) = NaN nghĩa là bộ thu đơn ăng-ten (VD: VN-210-S),
+% KHÔNG có số đo góc hướng -> chỉ cập nhật 6 hàng [vị trí; vận tốc].
+% gnss_meas(7) hữu hạn (VD: GEO-FOG 3D Dual) -> cập nhật đủ 7 hàng.
 if measurement_flags(1) ~= 0
-    Cbn = quat_to_cbn(quaternion);
+    has_gnss_yaw = isfinite(gnss_meas(7));
 
-    % Tính góc yaw hiện tại và phần dư residual (có cuộn tròn góc [-pi, pi])
-    yaw_estimate = atan2(Cbn(2, 1), Cbn(1, 1));
-    yaw_residual = atan2(sin(gnss_meas(7) - yaw_estimate), ...
-        cos(gnss_meas(7) - yaw_estimate));
-
-    % Vector phần dư đo đạc 7 chiều
+    % Phần dư và ma trận quan sát cho vị trí + vận tốc (6 hàng)
     residual = [gnss_meas(1:3) - position; ...
-        gnss_meas(4:6) - velocity; yaw_residual];
-
-    % Ma trận quan sát H_gnss (7x19)
-    H = zeros(7, 19);
+        gnss_meas(4:6) - velocity];
+    H = zeros(6, 19);
     H(1:3, 1:3) = eye(3); % Quan sát vị trí trực tiếp
     H(4:6, 4:6) = eye(3); % Quan sát vận tốc trực tiếp
+    R_diag = [cfg(15)^2*ones(1, 3), cfg(16)^2*ones(1, 3)];
 
-    % Đạo hàm riêng của góc yaw theo sai số góc quay delta_theta
-    roll_est = atan2(Cbn(3, 2), Cbn(3, 3));
-    pitch_est = -asin(max(min(Cbn(3, 1), 1), -1));
-    cosp = max(cos(pitch_est), 1e-6);
-    H(7, 7:9) = [0, sin(roll_est)/cosp, cos(roll_est)/cosp];
+    if has_gnss_yaw
+        Cbn = quat_to_cbn(quaternion);
 
-    % Ma trận hiệp phương sai nhiễu đo R_gnss
-    R = diag([cfg(15)^2*ones(1, 3), cfg(16)^2*ones(1, 3), cfg(17)^2]);
+        % Tính góc yaw hiện tại và phần dư residual (có cuộn tròn góc [-pi, pi])
+        yaw_estimate = atan2(Cbn(2, 1), Cbn(1, 1));
+        yaw_residual = atan2(sin(gnss_meas(7) - yaw_estimate), ...
+            cos(gnss_meas(7) - yaw_estimate));
 
-    % Thực hiện cập nhật Kalman và kiểm tra cổng lọc NIS (7 bậc tự do, ngưỡng 99% là 18.48)
+        % Đạo hàm riêng của góc yaw theo sai số góc quay delta_theta
+        roll_est = atan2(Cbn(3, 2), Cbn(3, 3));
+        pitch_est = -asin(max(min(Cbn(3, 1), 1), -1));
+        cosp = max(cos(pitch_est), 1e-6);
+        H_yaw = zeros(1, 19);
+        H_yaw(1, 7:9) = [0, sin(roll_est)/cosp, cos(roll_est)/cosp];
+
+        residual = [residual; yaw_residual];
+        H = [H; H_yaw];
+        R_diag = [R_diag, cfg(17)^2];
+    end
+
+    % Ma trận hiệp phương sai nhiễu đo R_gnss (6x6 hoặc 7x7)
+    R = diag(R_diag);
+
+    % Cập nhật Kalman + cổng NIS (6 bậc tự do: 16.81; 7 bậc tự do: 18.48; mức 99%)
     [delta_state, covariance, accepted, nis_value] = ...
         update_gnss(covariance, H, residual, R);
     update_status(1) = accepted;
@@ -261,12 +272,19 @@ end
 % =========================================================================
 
 function [delta_state, covariance, accepted, nis] = update_gnss(covariance, H, residual, R)
-%UPDATE_GNSS Cập nhật Kalman cho phép đo GNSS với cổng lọc NIS (7 bậc tự do).
+%UPDATE_GNSS Cập nhật Kalman cho phép đo GNSS với cổng lọc NIS (6 hoặc 7 bậc tự do).
 S = H*covariance*H' + R;
 nis = residual'*(S\residual);
 
-% Ngưỡng phân phối Chi-square 7 bậc tự do ở mức độ tin cậy 99% là 18.48 (mức 99.9% là 24.32)
-accepted = double(isfinite(nis) && nis <= 18.48);
+% Ngưỡng Chi-square mức tin cậy 99% theo số bậc tự do:
+%   6 bậc (đơn ăng-ten: vị trí + vận tốc)       : 16.81
+%   7 bậc (2 ăng-ten: vị trí + vận tốc + hướng)  : 18.48 (mức 99.9% là 24.32)
+if numel(residual) == 6
+    nis_gate = 16.81;
+else
+    nis_gate = 18.48;
+end
+accepted = double(isfinite(nis) && nis <= nis_gate);
 delta_state = zeros(19, 1);
 if accepted == 0
     return;

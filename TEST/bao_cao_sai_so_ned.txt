@@ -1,0 +1,30 @@
+========================================================================================
+  KET QUA PHAN TICH SAI SO QUY DAO THEO HE TRUC TOA DO NED
+========================================================================================
+File du lieu : ket_qua_esekf_GEO_FOG.mat
+Cam bien     : GEO-FOG 3D Dual INS (Emcore)
+Tong thoi gian: 1880.0 giay (Tong so buoc: 37601)
+Thoi diem cat GNSS (Bat dau lan): 480.0 giay
+
+--- 1. SAI SO CUOI CUNG TAI DIEM KET THUC HANH TRINH (t = 1880.0 s) ---
+  * Truc North (Bac)   :  -0.2123 m
+  * Truc East (Dong)   :  +0.1224 m
+  * Truc Down (Do sau) :  +0.0045 m
+  * Tong hop sai so 3D :   0.2451 m
+  * Sai so mat phang 2D:   0.2450 m
+
+--- 2. SAI SO CAN TRUNG BINH BINH PHUONG (RMS ERROR) TOAN HANH TRINH ---
+  * RMS North (Bac)    :   0.2995 m  | Max tuyet doi:   0.6742 m
+  * RMS East (Dong)    :   0.1094 m  | Max tuyet doi:   0.2395 m
+  * RMS Down (Do sau)  :   0.0131 m  | Max tuyet doi:   0.0511 m
+  * RMS Tong hop 3D    :   0.3191 m  | Max tuyet doi:   0.6779 m
+
+--- 3. PHAN TICH THEO 2 GIAI DOAN HOAT DONG ---
+A. Giai doan noi tren mat nuoc (co GNSS, t <= 480 s):
+   - RMS North / East / Down : 0.0044 m / 0.0040 m / 0.0053 m
+   - RMS 3D                  : 0.0080 m  (Max 3D: 0.0859 m)
+B. Giai doan lan ngam duoi bien (mat GNSS hoan toan, t > 480 s):
+   - RMS North / East / Down : 0.3470 m / 0.1267 m / 0.0148 m
+   - RMS 3D                  : 0.3698 m  (Max 3D: 0.6779 m)
+
+========================================================================================

@@ -26,7 +26,6 @@ project_root = fileparts(script_dir);
 
 addpath(fullfile(project_root, 'algo'));
 addpath(fullfile(project_root, 'Sensor'));
-addpath(fullfile(project_root, 'dieukiendauvao'));
 addpath(fullfile(project_root, 'AUV_simulation', 'MSS', 'GNC'));
 addpath(fullfile(project_root, 'AUV_simulation', 'MSS', 'LIBRARY'));
 addpath(fullfile(project_root, 'AUV_simulation', 'MSS', 'CRAFT', 'AUV'));
@@ -128,7 +127,6 @@ if use_parfor
     try
         pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'algo')));
         pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'Sensor')));
-        pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'dieukiendauvao')));
         pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'AUV_simulation', 'MSS', 'GNC')));
         pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'AUV_simulation', 'MSS', 'LIBRARY')));
         pctRunOnAll(sprintf('addpath(''%s'');', fullfile(project_root, 'AUV_simulation', 'MSS', 'CRAFT', 'AUV')));
@@ -818,6 +816,8 @@ ins_spec = GEO_FOG_3D('spec');
 bg_true_run = [deg2rad(0.2)/3600; -deg2rad(0.15)/3600; deg2rad(0.3)/3600] + ins_spec.gyro.bias_instab * randn(3, 1);
 ba_true_run = [0.008; -0.012; 0.006] + ins_spec.acc.bias_instab * randn(3, 1);
 ins_state = GEO_FOG_3D('init', ins_spec, bg_true_run, ba_true_run);
+bar_spec = Bar_10XT('spec');
+bar_state = Bar_10XT('init', bar_spec);
 
 % Mô phỏng nghiêm ngặt theo đặc tính nhiễu cảm biến GEO-FOG 3D Dual
 sigma_vrw = ins_spec.acc.vrw;
@@ -852,7 +852,7 @@ cfg(14) = 0.005;      % dvl_noise_slope
 cfg(15) = ins_spec.gnss.pos_v;
 cfg(16) = ins_spec.gnss.vel;
 cfg(17) = ins_spec.gnss.heading;
-cfg(18) = 0.05;       % sigma_depth
+cfg(18) = bar_spec.sigma_depth_nominal;       % sigma_depth Bar_10XT
 cfg(19) = acc_bias_tau;
 cfg(20) = sigma_arw;
 
@@ -965,8 +965,14 @@ for k = 1:nSteps
 
     % Cập nhật đo đạc 5 Hz (mỗi 0.2s)
     if mod(k, 4) == 0
-        depth_meas = zn + 0.02 * randn;
-        flags(2) = 1;
+        % Cảm biến đo sâu áp suất BlueRobotics Bar10XT gọi qua module Sensor/Bar_10XT
+        [depth_meas, ~, is_valid_depth, bar_state] = Bar_10XT('step', ...
+            zn, 0.2, bar_state, bar_spec, 1025.0, lat_rad);
+        if is_valid_depth
+            flags(2) = 1;
+        else
+            flags(2) = 0; % Vượt ngưỡng dải đo tuyến tính bão hòa (>10 bar) -> mất tín hiệu đo sâu
+        end
 
         if ~(tk >= t_dvl_dropout_start && tk <= t_dvl_dropout_end)
             v_lever = v_body + cross(omega_b, lever_arm);
@@ -983,8 +989,8 @@ for k = 1:nSteps
             flags(3) = 1;
         end
 
-        % GNSS RTK mặt nước
-        if tk <= T_gnss_cut
+        % GNSS RTK mặt nước (chỉ nhận khi chưa cắt GNSS và đang ở mặt nước zn <= 0.5m)
+        if tk <= T_gnss_cut && zn <= 0.5
             gnss_meas = GEO_FOG_3D('gnss', ins_spec, [xn; yn; zn], v_ned_true, psi);
             flags(1) = 1;
         end

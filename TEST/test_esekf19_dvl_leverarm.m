@@ -20,8 +20,6 @@ test_dir = fileparts(mfilename('fullpath'));
 root_dir = fileparts(test_dir);
 addpath(fullfile(root_dir, 'algo'));
 addpath(fullfile(root_dir, 'Sensor'));
-addpath(fullfile(root_dir, 'dieukiendauvao'));
-addpath(fullfile(root_dir, 'quydaochuyendong'));
 
 fprintf('========================================================================================\n');
 fprintf('  BỘ TEST 2: KIỂM TRA MÔ HÌNH DVL, NHIỄU GYRO VÀ CÁNH TAY ĐÒN IMU-DVL\n');

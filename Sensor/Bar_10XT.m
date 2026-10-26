@@ -53,7 +53,7 @@ end
 % 3. CHẾ ĐỘ MÔ-ĐUN CHUẨN
 switch lower(char(mode))
     case 'spec'
-        varargout{1} = build_spec();
+        varargout{1} = build_spec(varargin{:});
     case 'init'
         varargout{1} = init_state(varargin{:});
     case {'step', 'measure'}
@@ -67,9 +67,31 @@ end
 
 end
 
-%% ===================== THÔNG SỐ KỸ THUẬT BAR10XT =====================
-function s = build_spec()
-s.ten = 'BlueRobotics Bar10XT High-Resolution Depth/Pressure Sensor';
+%% ===================== THÔNG SỐ KỸ THUẬT BAR10XT / BAR30 =====================
+function s = build_spec(variant)
+if nargin < 1 || isempty(variant), variant = 'Bar10XT'; end
+s = struct();
+
+switch upper(char(variant))
+    case {'BAR30', '30BAR', 'KELLER30', 'BAR_30'}
+        s.ten = 'Keller 4LD / BlueRobotics Bar30 Depth Sensor (30 bar / 300m)';
+        s.p_max_mechanical_bar = 50.0;
+        s.p_operating_min_bar = 0.0;
+        s.p_operating_max_bar = 30.0;          % Dải đo danh định 30 bar (phù hợp lặn 100m - 300m)
+        s.depth_operating_max_m = 300.0;
+    case {'BAR100', '100BAR', 'BAR_100'}
+        s.ten = 'Keller 4LD / BlueRobotics Bar100 Depth Sensor (100 bar / 1000m)';
+        s.p_max_mechanical_bar = 150.0;
+        s.p_operating_min_bar = 0.0;
+        s.p_operating_max_bar = 100.0;
+        s.depth_operating_max_m = 1000.0;
+    otherwise
+        s.ten = 'BlueRobotics Bar10XT High-Resolution Depth/Pressure Sensor (10 bar / 92m)';
+        s.p_max_mechanical_bar = 40.0;         % Ngưỡng phá hủy cơ khí tối đa (40 bar)
+        s.p_operating_min_bar = 0.0;           % Áp suất làm việc tối thiểu (0 bar)
+        s.p_operating_max_bar = 10.0;          % Áp suất làm việc danh định tối đa (10.0 bar)
+        s.depth_operating_max_m = 92.0;        % Độ sâu công bố danh định nước ngọt (92 m)
+end
 
 % 1. Thông số điện năng và logic phần cứng (từ warning.md)
 s.vin_typical_v = 3.3;                 % Điện áp danh định (V)
@@ -84,10 +106,6 @@ s.temp_operating_max_c = 80.0;         % Nhiệt độ hoạt động tối đa 
 
 % 2. Thông số áp suất và độ sâu (từ warning.md)
 s.p_atm_pa = 101325.0;                 % Áp suất khí quyển chuẩn tham chiếu PA (1.01325 bar)
-s.p_max_mechanical_bar = 40.0;         % Ngưỡng phá hủy cơ khí tối đa (40 bar)
-s.p_operating_min_bar = 0.0;           % Áp suất làm việc tối thiểu (0 bar)
-s.p_operating_max_bar = 10.0;          % Áp suất làm việc danh định tối đa (10.0 bar)
-s.depth_operating_max_m = 92.0;        % Độ sâu công bố danh định nước ngọt (92 m)
 s.pressure_type = 'PA: Sealed pressure, 1 bar absolute reference';
 
 % 3. Sai số và độ phân giải theo datasheet (từ warning.md)

@@ -31,8 +31,6 @@ test_dir = fileparts(mfilename('fullpath'));
 root_dir = fileparts(test_dir);
 addpath(fullfile(root_dir, 'algo'));
 addpath(fullfile(root_dir, 'Sensor'));
-addpath(fullfile(root_dir, 'dieukiendauvao'));
-addpath(fullfile(root_dir, 'quydaochuyendong'));
 
 fprintf('========================================================================================\n');
 fprintf('  NHIỆM VỤ 3: CALIBRATION CONVERGENCE TEST (M = %d RUNS, COLD START)\n', M_runs);
