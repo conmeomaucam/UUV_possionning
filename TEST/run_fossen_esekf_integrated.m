@@ -651,8 +651,15 @@ for i = 1:nTimeSteps
         end
     else
         % Đang bám mốc cuối cùng (curr_wp_idx == length(wpt.pos.x))
-        dist_to_dest = norm([xn - wpt.pos.x(end); yn - wpt.pos.y(end); zn - wpt.pos.z(end)]);
-        if dist_to_dest < R_switch * 1.5
+        dist_to_dest_true = norm([xn - wpt.pos.x(end); yn - wpt.pos.y(end); zn - wpt.pos.z(end)]);
+        dist_to_dest_est  = norm([p_hat(1) - wpt.pos.x(end); p_hat(2) - wpt.pos.y(end); p_hat(3) - wpt.pos.z(end)]);
+        
+        % Chiếu dọc theo chặng cuối: tàu chạm hoặc vượt qua mặt cắt vuông góc của mốc đích
+        v_leg = [wpt.pos.x(end) - wpt.pos.x(end-1); wpt.pos.y(end) - wpt.pos.y(end-1); wpt.pos.z(end) - wpt.pos.z(end-1)];
+        v_to_wpt = [p_hat(1) - wpt.pos.x(end); p_hat(2) - wpt.pos.y(end); p_hat(3) - wpt.pos.z(end)];
+        passed_dest = (dot(v_to_wpt, v_leg) >= 0) && (dist_to_dest_est < R_switch * 4);
+
+        if dist_to_dest_est < R_switch * 1.5 || dist_to_dest_true < R_switch * 1.5 || passed_dest
             fprintf('\n[ĐẾN ĐÍCH] Tàu đã hoàn thành toàn bộ %d Waypoints và cập đích tại t = %.1f s!\n', ...
                 length(wpt.pos.x), t(i));
             t = t(1:i);

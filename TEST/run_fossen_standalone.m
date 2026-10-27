@@ -258,7 +258,11 @@ for i = 1:nTimeSteps
     else
         % Đang bám mốc cuối cùng (curr_wp_idx == length(wpt.pos.x))
         dist_to_dest = norm([xn - wpt.pos.x(end); yn - wpt.pos.y(end); zn - wpt.pos.z(end)]);
-        if dist_to_dest < R_switch * 1.5
+        v_leg = [wpt.pos.x(end) - wpt.pos.x(end-1); wpt.pos.y(end) - wpt.pos.y(end-1); wpt.pos.z(end) - wpt.pos.z(end-1)];
+        v_to_wpt = [xn - wpt.pos.x(end); yn - wpt.pos.y(end); zn - wpt.pos.z(end)];
+        passed_dest = (dot(v_to_wpt, v_leg) >= 0) && (dist_to_dest < R_switch * 3);
+
+        if dist_to_dest < R_switch * 1.5 || passed_dest
             fprintf('[FOSSEN STANDALONE] Tàu đã hoàn thành và cập đích cuối cùng tại t = %.1f s!\n', t(i));
             t = t(1:i);
             pos_history = pos_history(1:i, :);
