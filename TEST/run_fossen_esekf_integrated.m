@@ -65,11 +65,24 @@ dvl_step = round(dt_dvl / h); % Cập nhật DVL mỗi 4 bước mô phỏng 20 
 lat_rad = deg2rad(20.8);
 
 % Kiểm tra xem có kịch bản tùy biến từ AUV Mission Planner hay không
-mission_file = fullfile(project_root, 'MISSION_PLANNER', 'kich_ban_mission.m');
-if exist(mission_file, 'file')
-    fprintf('[MISSION PLANNER] Phát hiện kịch bản: %s\n', mission_file);
-    run(mission_file);
-else
+mission_candidates = { ...
+    fullfile(project_root, 'MISSION_PLANNER', 'kich_ban_mission.m'), ...
+    fullfile(project_root, 'TEST', 'kich_ban_mission.m'), ...
+    fullfile(project_root, 'kich_ban_mission.m'), ...
+    fullfile(getenv('USERPROFILE'), 'Downloads', 'kich_ban_mission.m') ...
+};
+
+mission_loaded = false;
+for mc = 1:numel(mission_candidates)
+    if exist(mission_candidates{mc}, 'file')
+        fprintf('[MISSION PLANNER] Nạp kịch bản ngoại vi thành công: %s\n', mission_candidates{mc});
+        run(mission_candidates{mc});
+        mission_loaded = true;
+        break;
+    end
+end
+
+if ~mission_loaded
     % Mặc định dùng kịch bản cơ sở
     wpt_surface_x = [  0,   0, -30,   30, -20,   0 ];  % North (m)
     wpt_surface_y = [  0, 120, 270,  430, 580, 720 ];  % East (m)
@@ -82,6 +95,14 @@ else
     wpt.pos.x = [wpt_surface_x, wpt_mission_x];
     wpt.pos.y = [wpt_surface_y, wpt_mission_y];
     wpt.pos.z = [wpt_surface_z, wpt_mission_z];
+end
+
+% Tự động tính toán đảm bảo T_final luôn đủ thời gian để tàu đi hết toàn bộ các Waypoints
+wp_dists = sqrt(diff(wpt.pos.x).^2 + diff(wpt.pos.y).^2 + diff(wpt.pos.z).^2);
+total_path_len = sum(wp_dists);
+T_est_conservative = ceil(total_path_len / 1.0 * 1.5 + 400); % Tốc độ thận trọng 1.0 m/s + 50% dự phòng
+if T_final < T_est_conservative
+    T_final = T_est_conservative;
 end
 
 t = 0:h:T_final;
@@ -230,7 +251,12 @@ gamma_h = 0.001;
 gamma_v = 0.001;
 M_theta = deg2rad(20);
 R_switch = 20;
+min_wp_dist = min(sqrt(diff(wpt.pos.x).^2 + diff(wpt.pos.y).^2 + diff(wpt.pos.z).^2));
+if R_switch >= min_wp_dist
+    R_switch = max(5, min_wp_dist * 0.7);
+end
 K_f = 0.5;
+curr_wp_idx = 1; % Mốc Waypoint mục tiêu hiện tại (bắt đầu từ WP1)
 
 %% 3. THIẾT LẬP CĂN CHỈNH BAN ĐẦU (ALIGNMENT COLD START - LOẠI BỎ ORACLE CHEAT)
 % Không dùng giá trị thật (Ground Truth) để khởi tạo bộ lọc.
@@ -564,7 +590,11 @@ for i = 1:nTimeSteps
         betaVc = deg2rad(150);
     end
 
-    % Động học chân vịt
+    % Động học chân vịt (tự động điều chỉnh vòng quay theo tốc độ mong muốn của mốc)
+    if isfield(wpt, 'speed') && numel(wpt.speed) >= curr_wp_idx
+        u_target = wpt.speed(curr_wp_idx);
+        n_d = sat(round(u_target * 870), n_max); % ~870 RPM cho mỗi 1.0 m/s
+    end
     if n_p < n_d
         n_p = n_p + n_rate;
     elseif n_p > n_d
@@ -612,6 +642,41 @@ for i = 1:nTimeSteps
         theta_int = theta_int + h * ssa(theta_hat - theta_d);
     end
     ui_curr = ui;
+
+    % 4.9. Kiểm tra cập mốc và tự động dừng khi đến đích cuối cùng
+    if curr_wp_idx < length(wpt.pos.x)
+        dist_to_curr = norm([xn - wpt.pos.x(curr_wp_idx); yn - wpt.pos.y(curr_wp_idx); zn - wpt.pos.z(curr_wp_idx)]);
+        if dist_to_curr < R_switch
+            curr_wp_idx = curr_wp_idx + 1;
+        end
+    else
+        % Đang bám mốc cuối cùng (curr_wp_idx == length(wpt.pos.x))
+        dist_to_dest = norm([xn - wpt.pos.x(end); yn - wpt.pos.y(end); zn - wpt.pos.z(end)]);
+        if dist_to_dest < R_switch * 1.5
+            fprintf('\n[ĐẾN ĐÍCH] Tàu đã hoàn thành toàn bộ %d Waypoints và cập đích tại t = %.1f s!\n', ...
+                length(wpt.pos.x), t(i));
+            t = t(1:i);
+            pos_true_hist = pos_true_hist(1:i, :);
+            pos_est_hist  = pos_est_hist(1:i, :);
+            vel_true_hist = vel_true_hist(1:i, :);
+            vel_est_hist  = vel_est_hist(1:i, :);
+            euler_true_hist = euler_true_hist(1:i, :);
+            euler_est_hist  = euler_est_hist(1:i, :);
+            boresight_est_hist = boresight_est_hist(1:i, :);
+            scale_est_hist = scale_est_hist(1:i);
+            cov_bs_hist = cov_bs_hist(1:i, :);
+            cov_scale_hist = cov_scale_hist(1:i);
+            cov_pos_hist = cov_pos_hist(1:i, :);
+            cov_euler_hist = cov_euler_hist(1:i, :);
+            ui_hist = ui_hist(1:i, :);
+            alos_hist = alos_hist(1:i, :);
+            bg_true_hist = bg_true_hist(1:i, :);
+            bg_est_hist = bg_est_hist(1:i, :);
+            nis_hist = nis_hist(1:i, :);
+            acc_hist = acc_hist(1:i, :);
+            break;
+        end
+    end
 end
 
 time_elapsed = toc(tic_sim);
@@ -660,12 +725,16 @@ leg_handles = [];
 leg_labels  = {};
 
 if has_fossen
-    % 1. Đường Fossen Standalone thuần (lý tưởng)
-    h_fossen = plot3(pos_fossen(:, 2), pos_fossen(:, 1), pos_fossen(:, 3), ...
-        'Color', [0, 0.55, 0], 'LineStyle', '--', 'LineWidth', 2.2);
-    hold on;
-    leg_handles(end+1) = h_fossen;
-    leg_labels{end+1}  = '1. Fossen Standalone (Ly tuong)';
+    % Chỉ vẽ Fossen Standalone nếu cùng tập Waypoint đích (tránh lệch file cũ)
+    if isfield(fossen_data, 'wpt') && ...
+       numel(fossen_data.wpt.pos.x) == numel(wpt.pos.x) && ...
+       norm([fossen_data.wpt.pos.x(end) - wpt.pos.x(end); fossen_data.wpt.pos.y(end) - wpt.pos.y(end)]) < 50
+        h_fossen = plot3(pos_fossen(:, 2), pos_fossen(:, 1), pos_fossen(:, 3), ...
+            'Color', [0, 0.55, 0], 'LineStyle', '--', 'LineWidth', 2.2);
+        hold on;
+        leg_handles(end+1) = h_fossen;
+        leg_labels{end+1}  = '1. Fossen Standalone (Ly tuong)';
+    end
 end
 
 % 2. Tàu chạy thực tế (có khép vòng điều khiển nhận phản hồi từ ES-EKF)

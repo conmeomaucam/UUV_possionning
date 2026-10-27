@@ -24,25 +24,26 @@
       <div class="brand-icon">⚓</div>
       <div class="brand-title">
         <h1>REMUS 100 MISSION PLANNER</h1>
-        <p>Hệ Thống Hoạch Định Quỹ Đạo 3D & Sinh Kịch Bản Mô Phỏng ES-EKF</p>
+        <p>Hệ Thống Hoạch Định Quỹ Đạo 3D Mặt Nước & Lặn Ngầm</p>
       </div>
     </div>
 
     <div class="header-center">
-      <!-- Preset Regions -->
+      <!-- Preset Water Regions -->
       <div class="preset-selector">
         <label for="regionSelect">Khu vực:</label>
         <select id="regionSelect">
-          <option value="catba" selected>Vịnh Hạ Long / Cát Bà (20.8°N)</option>
-          <option value="hoabinh">Hồ Hòa Bình (Đo sâu thực tế)</option>
-          <option value="camranh">Vịnh Cam Ranh</option>
+          <option value="lanha" selected>Vịnh Lan Hạ - Cát Bà (Mặt biển mở)</option>
+          <option value="halong">Vịnh Hạ Long (Vùng biển mở)</option>
+          <option value="hoabinh">Hồ Hòa Bình (Lòng hồ đo sâu thực tế)</option>
+          <option value="camranh">Vịnh Cam Ranh (Mặt nước)</option>
           <option value="vungtau">Vùng biển Vũng Tàu</option>
         </select>
       </div>
 
       <!-- Basemap Switcher -->
       <div class="preset-selector">
-        <label for="basemapSelect">Bản đồ nền:</label>
+        <label for="basemapSelect">Bản đồ:</label>
         <select id="basemapSelect">
           <option value="googleHybrid" selected>Google Vệ Tinh (Hybrid)</option>
           <option value="googleSat">Google Vệ Tinh Thuần</option>
@@ -53,25 +54,25 @@
     </div>
 
     <div class="header-actions">
-      <button class="btn btn-secondary" onclick="loadDefaultScenario()" title="Tải lại 12 Waypoints mẫu của mô phỏng hiện tại">
-        🔄 Kịch Bản Mẫu (12 WP)
+      <button class="btn btn-primary btn-sm" onclick="openCalibrationModal()" title="Tự động tạo quỹ đạo S-Curve hoặc Zigzag hiệu chuẩn Boresight và Scale Factor">
+        🎯 Tạo Hiệu Chuẩn
       </button>
 
-      <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()" title="Mở file JSON đã lưu">
-        📂 Mở Dự Án
-      </button>
-      <input type="file" id="fileInput" accept=".json" style="display:none;" onchange="loadProjectJson(event)">
-
-      <button class="btn btn-secondary" onclick="saveProjectJson()" title="Lưu kịch bản ra file JSON">
-        💾 Lưu Dự Án
+      <button class="btn btn-secondary btn-sm" onclick="zoomToCalibrationZone()" title="Phóng to cực đại vào vùng hiệu chuẩn mặt nước (< 500m)">
+        🔍 Zoom Gần
       </button>
 
-      <button class="btn btn-secondary" onclick="openMatlabModal()" title="Xem trước code MATLAB sinh ra">
-        👁️ Xem Mã MATLAB
+      <button class="btn btn-secondary btn-sm" onclick="zoomToFullMission()" title="Xem toàn bộ quỹ đạo">
+        🌐 Toàn Cảnh
       </button>
 
-      <button class="btn btn-emerald" onclick="downloadMatlabFile()" title="Tải file kich_ban_mission.m về máy để chạy mô phỏng">
-        ⚡ Xuất Kịch Bản MATLAB (.m)
+      <button class="btn btn-secondary btn-sm" onclick="loadDefaultScenario()" title="Nạp lại kịch bản mẫu ban đầu">
+        🔄 Mẫu
+      </button>
+
+      <!-- Prominent Header Export Button -->
+      <button class="btn btn-emerald btn-sm" onclick="downloadMatlabFile()" title="Tải file kich_ban_mission.m về máy để chạy mô phỏng">
+        ⚡ Xuất File .m
       </button>
     </div>
   </header>
@@ -85,14 +86,19 @@
         <div class="sidebar-title">
           <span>🎯</span> BẢNG ĐIỀU KHIỂN NHIỆM VỤ
         </div>
-        <button class="btn btn-danger btn-sm" onclick="clearAllWaypoints()">Xóa Hết</button>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-secondary btn-sm" onclick="saveProjectJson()" title="Lưu kịch bản ra file JSON">💾 Lưu</button>
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('fileInput').click()" title="Mở file JSON">📂 Mở</button>
+          <input type="file" id="fileInput" accept=".json" style="display:none;" onchange="loadProjectJson(event)">
+          <button class="btn btn-danger btn-sm" onclick="clearAllWaypoints()">Xóa Hết</button>
+        </div>
       </div>
 
       <div class="sidebar-content">
         <!-- Telemetry Summary Grid -->
         <div class="metrics-grid">
           <div class="metric-card">
-            <span class="metric-label">Số Mốc Waypoints</span>
+            <span class="metric-label">Tổng Số Mốc Waypoints</span>
             <div class="metric-value" id="metricWptCount">0</div>
           </div>
           <div class="metric-card">
@@ -100,26 +106,64 @@
             <div class="metric-value" id="metricDistance">0.00 <span class="metric-unit">km</span></div>
           </div>
           <div class="metric-card">
-            <span class="metric-label">Thời Gian Dự Kiến</span>
+            <span class="metric-label">Tổng Thời Gian Dự Kiến</span>
             <div class="metric-value" id="metricTime">0m 0s</div>
           </div>
           <div class="metric-card">
             <span class="metric-label">Độ Sâu Cực Đại</span>
             <div class="metric-value" id="metricMaxDepth">0 <span class="metric-unit">m</span></div>
           </div>
-          <div class="metric-card" style="grid-column: span 2;">
-            <span class="metric-label">Thời Điểm Cắt GNSS Dự Kiến (z > 0.5m)</span>
-            <div class="metric-value" id="metricGnssCut" style="color:var(--accent-amber);">0.0 <span class="metric-unit">giây</span></div>
+        </div>
+
+        <!-- BIG PROMINENT EXPORT ACTION BUTTONS -->
+        <div style="display:flex; flex-direction:column; gap:6px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:8px; padding:10px;">
+          <button class="btn btn-emerald" style="width:100%; justify-content:center; padding:10px 14px; font-size:13px; font-weight:800; letter-spacing:0.02em;" onclick="downloadMatlabFile()" title="Tải file kịch bản kich_ban_mission.m để MATLAB chạy mô phỏng">
+            ⚡ XUẤT KỊCH BẢN MATLAB (.m)
+          </button>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-secondary" style="flex:1; justify-content:center; font-size:11px;" onclick="openMatlabModal()" title="Xem nội dung code MATLAB sinh ra">
+              👁️ Xem Mã Script
+            </button>
+            <button class="btn btn-secondary" style="flex:1; justify-content:center; font-size:11px;" onclick="copyMatlabCode()" title="Sao chép toàn bộ code MATLAB vào clipboard">
+              📋 Copy Mã
+            </button>
           </div>
         </div>
 
-        <!-- Waypoint Table Box -->
-        <div class="section-box" style="flex: 1; display:flex; flex-direction:column;">
+        <!-- TRAJECTORY ADJUSTMENT TOOLS (Chỉnh vị trí & Xoay hướng trên biển) -->
+        <div class="traj-tools-box">
+          <div class="traj-tools-title">
+            <span>🧭 ĐIỀU CHỈNH VỊ TRÍ & HƯỚNG TRÊN MẶT NƯỚC</span>
+            <span id="headingDisplay" style="color:var(--accent-cyan); font-family:var(--font-mono);">090° (Đông)</span>
+          </div>
+
+          <!-- Heading Rotation Slider -->
+          <div class="rotate-control">
+            <span>Xoay hướng:</span>
+            <input type="range" id="headingSlider" min="0" max="360" value="90" step="5" class="rotate-slider"
+              oninput="onRotateSlider(this.value)">
+          </div>
+
+          <!-- Group Drag Toggle & Relocate Button -->
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+            <label class="toggle-group-move" title="Khi bật, bạn chỉ cần kéo điểm WP1 ra chỗ mặt nước bất kỳ, toàn bộ quỹ đạo sẽ dịch chuyển theo!">
+              <input type="checkbox" id="groupMoveToggle" checked>
+              <span>Kéo WP1 để dời cả quỹ đạo</span>
+            </label>
+
+            <button class="btn btn-primary btn-sm" id="btnPickOrigin" onclick="startPickOriginMode()" title="Bấm vào đây rồi click chuột lên mặt biển bất kỳ để chuyển toàn bộ quỹ đạo đến đó">
+              📍 Click Biển Đặt Lại Gốc
+            </button>
+          </div>
+        </div>
+
+        <!-- Waypoint Table Box with Direct Editable Inputs -->
+        <div class="section-box" style="flex: 1; display:flex; flex-direction:column; min-height: 0;">
           <div class="section-box-header">
             <div class="section-box-title">
-              <span>📍</span> DANH SÁCH MỐC TOẠ ĐỘ (NED & ĐỘ SÂU)
+              <span>📍</span> DANH SÁCH MỐC TOẠ ĐỘ (NHẬP TRỰC TIẾP HOẶC KÉO THẢ)
             </div>
-            <span style="font-size:10px; color:var(--text-dim); font-family:var(--font-mono);">Kéo thả điểm trên bản đồ</span>
+            <span style="font-size:10px; color:var(--text-dim); font-family:var(--font-mono);">Chỉnh từng mét</span>
           </div>
 
           <div class="wpt-table-container">
@@ -127,8 +171,8 @@
               <thead>
                 <tr>
                   <th>Mốc</th>
-                  <th>North (x)</th>
-                  <th>East (y)</th>
+                  <th>North x (m)</th>
+                  <th>East y (m)</th>
                   <th>Sâu z (m)</th>
                   <th>U (m/s)</th>
                   <th>Trạng thái</th>
@@ -141,15 +185,6 @@
             </table>
           </div>
         </div>
-
-        <!-- Guidance Instruction Note -->
-        <div style="background:rgba(15,23,42,0.6); border:1px solid rgba(56,189,248,0.15); border-radius:8px; padding:10px 12px; font-size:11px; color:var(--text-muted); line-height:1.5;">
-          <b style="color:var(--accent-cyan);">💡 Hướng dẫn nhanh:</b><br>
-          1. <b>Click trên bản đồ</b> để thả thêm Waypoint mới.<br>
-          2. <b>Cầm kéo thả</b> từng điểm để chỉnh vị trí chính xác.<br>
-          3. Sửa <b>Sâu z</b> trực tiếp trong bảng: <b style="color:var(--accent-emerald);">z ≤ 0.5m</b> = Nổi (có GNSS), <b style="color:var(--accent-cyan);">z > 0.5m</b> = Lặn ngầm (mất GNSS, chạy DVL).<br>
-          4. Bấm nút <b>"Xuất Kịch Bản MATLAB"</b> để nạp vào chạy mô phỏng.
-        </div>
       </div>
     </aside>
 
@@ -158,17 +193,17 @@
       <div id="map"></div>
 
       <!-- Floating Map Header Control -->
-      <div class="map-floating-bar">
+      <div class="map-floating-bar" id="mapStatusBar">
         <div class="map-mode-indicator">
           <div class="mode-dot"></div>
-          <span>Chế độ: <b>Thả Waypoint (Click bất kỳ trên mặt biển)</b></span>
+          <span id="mapStatusText">Chế độ: <b>Kéo WP1 để dời quỹ đạo hoặc click trên biển để thêm điểm</b></span>
         </div>
       </div>
 
       <!-- Cursor Coordinate Tracker -->
       <div class="map-cursor-info">
-        <span>Vĩ độ: <b id="cursorLat">20.800000</b></span>
-        <span>Kinh độ: <b id="cursorLon">107.050000</b></span>
+        <span>Vĩ độ: <b id="cursorLat">20.720000</b></span>
+        <span>Kinh độ: <b id="cursorLon">107.090000</b></span>
         <span>North (x): <b id="cursorNorth">+0.0 m</b></span>
         <span>East (y): <b id="cursorEast">+0.0 m</b></span>
       </div>
@@ -180,7 +215,7 @@
             <span>📉</span> MẶT CẮT DỌC ĐỘ SÂU THEO HÀNH TRÌNH (DEPTH PROFILE)
           </div>
           <div>
-            <span style="font-size:10px; color:var(--text-dim); margin-right:12px;">Xanh lá: Nổi có GNSS | Xanh lơ: Lặn ngầm DVL/INS</span>
+            <span style="font-size:10px; color:var(--text-dim); margin-right:12px;">Xanh lá: Nổi có GNSS (Hiệu chuẩn) | Xanh lơ: Lặn ngầm DVL/INS</span>
             <button class="btn btn-secondary btn-sm" onclick="document.getElementById('bottomProfile').classList.toggle('collapsed')">
               Thu Gọn / Mở Rộng
             </button>
@@ -192,6 +227,68 @@
       </div>
     </main>
 
+  </div>
+
+  <!-- MODAL CALIBRATION PATTERN GENERATOR -->
+  <div class="modal-overlay" id="calibModal">
+    <div class="modal-dialog" style="width: 640px;">
+      <div class="modal-header">
+        <div class="modal-title">⚙️ Bộ Tạo Quỹ Đạo Hiệu Chuẩn Boresight & Scale Factor</div>
+        <button class="btn btn-secondary btn-sm" onclick="closeCalibrationModal()">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:12px; color:var(--text-main); font-size:12px;">
+        <p style="color:var(--text-muted); line-height:1.5;">
+          Chọn dạng quỹ đạo mặt nước (z = 0m, có tín hiệu GNSS RTK) để kích thích góc lệch lắp đặt Boresight 3 chiều và Scale Factor DVL:
+        </p>
+        
+        <!-- Pattern Selection Cards -->
+        <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:10px;">
+          <div class="pattern-card active" id="pattern-scurve" onclick="selectCalibPattern('scurve')">
+            <div style="font-weight:700; color:var(--accent-cyan); font-size:12px;">🌊 S-Curve (Hình Sin Chuẩn Remus 100)</div>
+            <div style="font-size:11px; color:var(--text-muted);">Chạy thẳng & lượn sóng nhịp nhàng ±30m. Tối ưu kích thích Boresight Yaw và giữ ổn định DVL.</div>
+          </div>
+
+          <div class="pattern-card" id="pattern-zigzag" onclick="selectCalibPattern('zigzag')">
+            <div style="font-weight:700; color:var(--accent-emerald); font-size:12px;">⚡ Zig-Zag (Đổi Hướng Vuông Góc 90°)</div>
+            <div style="font-size:11px; color:var(--text-muted);">Cơ động bẻ góc 90° dứt khoát. Giúp Boresight Yaw hội tụ cực nhanh.</div>
+          </div>
+
+          <div class="pattern-card" id="pattern-figure8" onclick="selectCalibPattern('figure8')">
+            <div style="font-weight:700; color:var(--accent-amber); font-size:12px;">♾️ Vòng Số 8 (Figure-8)</div>
+            <div style="font-size:11px; color:var(--text-muted);">Quay 2 vòng khép kín ngược chiều. Triệt tiêu trôi dạt gyro và hiệu chuẩn 3 góc Boresight.</div>
+          </div>
+
+          <div class="pattern-card" id="pattern-speedstep" onclick="selectCalibPattern('speedstep')">
+            <div style="font-weight:700; color:var(--accent-purple); font-size:12px;">🚀 Đổi Tốc Độ (Scale Factor Test)</div>
+            <div style="font-size:11px; color:var(--text-muted);">Chạy các đoạn thẳng thay đổi dải vận tốc (1.0 -> 2.0 -> 1.5 m/s) để khóa Scale Factor.</div>
+          </div>
+        </div>
+
+        <!-- Parameters Configuration Form -->
+        <div style="background:rgba(15,23,42,0.85); border:1px solid var(--border-color); border-radius:8px; padding:12px; display:grid; grid-template-columns: repeat(2, 1fr); gap:10px;">
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">Cự ly bước chạy (m):</label>
+            <input type="number" id="calibStepDist" value="150" min="50" max="500" step="10" class="wpt-input" style="width:100%; text-align:left;">
+          </div>
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">Biên độ lắc ngang (m):</label>
+            <input type="number" id="calibAmplitude" value="30" min="10" max="100" step="5" class="wpt-input" style="width:100%; text-align:left;">
+          </div>
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">Số chu kỳ / mốc cua:</label>
+            <input type="number" id="calibCycles" value="3" min="1" max="6" step="1" class="wpt-input" style="width:100%; text-align:left;">
+          </div>
+          <div>
+            <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:4px;">Tốc độ hành trình (m/s):</label>
+            <input type="number" id="calibSpeed" value="1.5" min="0.8" max="3.0" step="0.1" class="wpt-input" style="width:100%; text-align:left;">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeCalibrationModal()">Hủy</button>
+        <button class="btn btn-primary" onclick="applyCalibrationPattern()">⚡ Áp Dụng Quỹ Đạo Hiệu Chuẩn</button>
+      </div>
+    </div>
   </div>
 
   <!-- MODAL MATLAB CODE PREVIEW -->

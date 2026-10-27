@@ -33,24 +33,53 @@ clear integralSMCheading ALOS3D ALOSpsi LOSobserver;
 
 %% 1. THIẾT LẬP THAM SỐ MÔ PHỎNG VÀ VẬT LÝ
 h = 0.05;              % Chu kỳ trích mẫu h = 0.05 s (20 Hz)
-T_final = 1880;        % Tổng thời gian mô phỏng: 1880 s (480s mặt nước + 1400s lặn)
+T_final = 1880;        % Tổng thời gian mô phỏng mặc định
+lat_rad = deg2rad(20.8);
+
+% Kiểm tra xem có kịch bản tùy biến từ AUV Mission Planner hay không
+mission_candidates = { ...
+    fullfile(project_root, 'MISSION_PLANNER', 'kich_ban_mission.m'), ...
+    fullfile(project_root, 'TEST', 'kich_ban_mission.m'), ...
+    fullfile(project_root, 'kich_ban_mission.m'), ...
+    fullfile(getenv('USERPROFILE'), 'Downloads', 'kich_ban_mission.m') ...
+};
+
+mission_loaded = false;
+for mc = 1:numel(mission_candidates)
+    if exist(mission_candidates{mc}, 'file')
+        fprintf('[FOSSEN STANDALONE] Nạp kịch bản: %s\n', mission_candidates{mc});
+        run(mission_candidates{mc});
+        mission_loaded = true;
+        break;
+    end
+end
+
+if ~mission_loaded
+    % Định nghĩa các điểm chuyển hướng 3D Waypoints (Gồm 8 phút mặt nước + Nhiệm vụ lặn)
+    wpt_surface_x = [  0,   0, -30,   30, -20,   0 ];  % North (m)
+    wpt_surface_y = [  0, 120, 270,  430, 580, 720 ];  % East (m)
+    wpt_surface_z = [  0,   0,   0,    0,   0,   0 ];  % Down = 0m (Mặt nước)
+
+    wpt_mission_x = [ -20,  -100,     0,   200,  200,   400 ];
+    wpt_mission_y = [ 920,  1320,  1670,  2020, 2520,  2920 ];
+    wpt_mission_z = [  10,   100,   100,    50,   50,    50 ];
+
+    wpt.pos.x = [wpt_surface_x, wpt_mission_x];
+    wpt.pos.y = [wpt_surface_y, wpt_mission_y];
+    wpt.pos.z = [wpt_surface_z, wpt_mission_z];
+end
+
+% Tự động tính toán đảm bảo T_final luôn đủ thời gian để tàu đi hết toàn bộ các Waypoints
+wp_dists = sqrt(diff(wpt.pos.x).^2 + diff(wpt.pos.y).^2 + diff(wpt.pos.z).^2);
+total_path_len = sum(wp_dists);
+T_est_conservative = ceil(total_path_len / 1.0 * 1.5 + 400); % Tốc độ thận trọng 1.0 m/s + 50% dự phòng
+if T_final < T_est_conservative
+    T_final = T_est_conservative;
+end
+
 t = 0:h:T_final;
 nTimeSteps = length(t);
-
-% Định nghĩa các điểm chuyển hướng 3D Waypoints (Gồm 8 phút mặt nước + Nhiệm vụ lặn)
-% 1. Pha mặt nước 8 phút (z = 0 m): chạy thẳng và đổi hướng nhịp nhàng (S-curve nhẹ) để kích thích Boresight
-wpt_surface_x = [  0,   0, -30,   30, -20,   0 ];  % North (m)
-wpt_surface_y = [  0, 120, 270,  430, 580, 720 ];  % East (m)
-wpt_surface_z = [  0,   0,   0,    0,   0,   0 ];  % Down = 0m (Mặt nước)
-
-% 2. Pha lặn sâu nhiệm vụ cũ (tịnh tiến bắt đầu từ East = 720 m)
-wpt_mission_x = [ -20,  -100,     0,   200,  200,   400 ];
-wpt_mission_y = [ 920,  1320,  1670,  2020, 2520,  2920 ];
-wpt_mission_z = [  10,   100,   100,    50,   50,    50 ];
-
-wpt.pos.x = [wpt_surface_x, wpt_mission_x];
-wpt.pos.y = [wpt_surface_y, wpt_mission_y];
-wpt.pos.z = [wpt_surface_z, wpt_mission_z];
+curr_wp_idx = 1;
 
 % Khởi tạo trạng thái ban đầu của tàu
 xn = 0; yn = 0; zn = 0;
@@ -103,6 +132,10 @@ gamma_h = 0.001;
 gamma_v = 0.001;
 M_theta = deg2rad(20);
 R_switch = 20;
+min_wp_dist = min(wp_dists);
+if R_switch >= min_wp_dist
+    R_switch = max(5, min_wp_dist * 0.7);
+end
 K_f = 0.5;
 
 %% 3. BỘ ĐỆM LƯU TRỮ KẾT QUẢ
@@ -169,7 +202,11 @@ for i = 1:nTimeSteps
         betaVc = deg2rad(150);
     end
 
-    % Động học vòng quay chân vịt
+    % Động học vòng quay chân vịt (tự động điều chỉnh theo tốc độ mốc)
+    if isfield(wpt, 'speed') && numel(wpt.speed) >= curr_wp_idx
+        u_target = wpt.speed(curr_wp_idx);
+        n_d = sat(round(u_target * 870), n_max);
+    end
     if n_p < n_d
         n_p = n_p + n_rate;
     elseif n_p > n_d
@@ -211,6 +248,31 @@ for i = 1:nTimeSteps
 
     % Cập nhật khâu tích phân điều khiển độ sâu
     theta_int = theta_int + h * ssa(theta - theta_d);
+
+    % Kiểm tra cập mốc và tự động dừng khi đến đích cuối cùng
+    if curr_wp_idx < length(wpt.pos.x)
+        dist_to_curr = norm([xn - wpt.pos.x(curr_wp_idx); yn - wpt.pos.y(curr_wp_idx); zn - wpt.pos.z(curr_wp_idx)]);
+        if dist_to_curr < R_switch
+            curr_wp_idx = curr_wp_idx + 1;
+        end
+    else
+        % Đang bám mốc cuối cùng (curr_wp_idx == length(wpt.pos.x))
+        dist_to_dest = norm([xn - wpt.pos.x(end); yn - wpt.pos.y(end); zn - wpt.pos.z(end)]);
+        if dist_to_dest < R_switch * 1.5
+            fprintf('[FOSSEN STANDALONE] Tàu đã hoàn thành và cập đích cuối cùng tại t = %.1f s!\n', t(i));
+            t = t(1:i);
+            pos_history = pos_history(1:i, :);
+            vel_body_history = vel_body_history(1:i, :);
+            rates_history = rates_history(1:i, :);
+            euler_history = euler_history(1:i, :);
+            ui_history = ui_history(1:i, :);
+            alos_history = alos_history(1:i, :);
+            vel_ned_ideal = vel_ned_ideal(1:i, :);
+            f_b_ideal = f_b_ideal(1:i, :);
+            w_ib_b_ideal = w_ib_b_ideal(1:i, :);
+            break;
+        end
+    end
 end
 
 time_elapsed = toc(tic_sim);

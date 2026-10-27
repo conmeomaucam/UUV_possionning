@@ -1,13 +1,13 @@
 /* ==========================================================================
    AUV REMUS 100 MISSION PLANNER - STYLESHEET
-   Aesthetic Dark Mode & Glassmorphic Navigation Design
+   Aesthetic Dark Mode & High-Precision Ocean Navigation Design
    ========================================================================== */
 
 :root {
   --bg-primary: #070b14;
   --bg-secondary: #0d1527;
-  --bg-glass: rgba(13, 21, 39, 0.78);
-  --bg-card: rgba(17, 27, 49, 0.85);
+  --bg-glass: rgba(13, 21, 39, 0.85);
+  --bg-card: rgba(17, 27, 49, 0.9);
   --border-color: rgba(56, 189, 248, 0.18);
   --border-hover: rgba(56, 189, 248, 0.45);
   
@@ -28,7 +28,7 @@
   
   --shadow-glow: 0 0 20px rgba(0, 240, 255, 0.25);
   --shadow-card: 0 10px 30px -5px rgba(0, 0, 0, 0.6);
-  --transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 * {
@@ -48,7 +48,7 @@ body {
   flex-direction: column;
 }
 
-/* Scrollbar Styling */
+/* Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -68,7 +68,7 @@ body {
    TOP HEADER
    ========================================================================== */
 header {
-  height: 56px;
+  height: 54px;
   background: var(--bg-glass);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -76,7 +76,7 @@ header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  padding: 0 16px;
   z-index: 1000;
   position: relative;
 }
@@ -84,7 +84,7 @@ header {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .brand-icon {
@@ -102,7 +102,7 @@ header {
 }
 
 .brand-title h1 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.02em;
   background: linear-gradient(90deg, #ffffff, #a5f3fc);
@@ -111,25 +111,25 @@ header {
 }
 
 .brand-title p {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-muted);
 }
 
 .header-center {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .preset-selector {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: rgba(17, 27, 49, 0.7);
+  gap: 6px;
+  background: rgba(17, 27, 49, 0.8);
   border: 1px solid var(--border-color);
-  padding: 5px 12px;
+  padding: 4px 10px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .preset-selector label {
@@ -140,7 +140,7 @@ header {
   background: transparent;
   color: var(--accent-cyan);
   border: none;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   font-family: var(--font-main);
   outline: none;
@@ -155,7 +155,7 @@ header {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 /* ==========================================================================
@@ -164,16 +164,17 @@ header {
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
+  gap: 6px;
+  padding: 6px 12px;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition);
   border: 1px solid transparent;
   outline: none;
   user-select: none;
+  white-space: nowrap;
 }
 
 .btn-primary {
@@ -217,8 +218,8 @@ header {
 }
 
 .btn-sm {
-  padding: 4px 8px;
-  font-size: 11px;
+  padding: 3px 8px;
+  font-size: 10px;
 }
 
 /* ==========================================================================
@@ -235,7 +236,7 @@ header {
    SIDEBAR (MISSION INSPECTOR)
    ========================================================================== */
 .sidebar {
-  width: 440px;
+  width: 530px;
   background: var(--bg-glass);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -247,7 +248,7 @@ header {
 }
 
 .sidebar-header {
-  padding: 14px 16px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
@@ -255,7 +256,7 @@ header {
 }
 
 .sidebar-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -267,37 +268,38 @@ header {
 
 .sidebar-content {
   flex: 1;
-  overflow-y: auto;
-  padding: 14px 16px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
 }
 
 /* Telemetry Summary Cards */
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+  gap: 5px;
 }
 
 .metric-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 9px 12px;
+  border-radius: 6px;
+  padding: 5px 8px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   transition: var(--transition);
 }
 .metric-card:hover {
   border-color: var(--border-hover);
-  background: rgba(24, 38, 68, 0.9);
+  background: rgba(24, 38, 68, 0.95);
 }
 
 .metric-label {
-  font-size: 10px;
+  font-size: 8.5px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -305,18 +307,66 @@ header {
 
 .metric-value {
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: 13.5px;
   font-weight: 700;
   color: var(--text-main);
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 3px;
 }
 
 .metric-unit {
-  font-size: 10px;
+  font-size: 9.5px;
   color: var(--accent-cyan);
   font-weight: 500;
+}
+
+/* Trajectory Quick Adjustment Tools Box */
+.traj-tools-box {
+  background: var(--bg-card);
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: 6px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.traj-tools-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rotate-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.rotate-slider {
+  flex: 1;
+  accent-color: var(--accent-cyan);
+  cursor: pointer;
+}
+
+.toggle-group-move {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--accent-emerald);
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-group-move input {
+  accent-color: var(--accent-emerald);
+  cursor: pointer;
 }
 
 /* Section Box */
@@ -328,7 +378,7 @@ header {
 }
 
 .section-box-header {
-  padding: 8px 12px;
+  padding: 7px 10px;
   background: rgba(30, 41, 59, 0.4);
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -349,32 +399,37 @@ header {
 
 /* Waypoint Table */
 .wpt-table-container {
-  max-height: 250px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: auto;
 }
 
 .wpt-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: 10.5px;
 }
 
 .wpt-table th {
-  background: rgba(15, 23, 42, 0.9);
+  background: rgba(15, 23, 42, 0.95);
   color: var(--text-muted);
   font-weight: 600;
   text-align: left;
-  padding: 6px 8px;
+  padding: 5px 4px;
   position: sticky;
   top: 0;
   z-index: 10;
   border-bottom: 1px solid var(--border-color);
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .wpt-table td {
-  padding: 6px 8px;
+  padding: 4px 4px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   font-family: var(--font-mono);
+  vertical-align: middle;
 }
 
 .wpt-table tr {
@@ -385,17 +440,18 @@ header {
   background: rgba(56, 189, 248, 0.08);
 }
 .wpt-table tr.active {
-  background: rgba(0, 240, 255, 0.15);
+  background: rgba(0, 240, 255, 0.18);
   border-left: 3px solid var(--accent-cyan);
 }
 
 .wpt-tag {
   display: inline-block;
-  padding: 2px 6px;
+  padding: 2px 5px;
   border-radius: 4px;
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 700;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 .wpt-tag-surface {
   background: rgba(16, 185, 129, 0.2);
@@ -409,20 +465,20 @@ header {
 }
 
 .wpt-input {
-  width: 50px;
-  background: rgba(15, 23, 42, 0.8);
+  background: rgba(15, 23, 42, 0.9);
   border: 1px solid var(--border-color);
   color: var(--text-main);
   border-radius: 4px;
   padding: 2px 4px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10.5px;
   text-align: right;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .wpt-input:focus {
   outline: none;
   border-color: var(--accent-cyan);
-  box-shadow: 0 0 6px rgba(0, 240, 255, 0.3);
+  box-shadow: 0 0 6px rgba(0, 240, 255, 0.4);
 }
 
 /* ==========================================================================
@@ -452,7 +508,7 @@ header {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--border-color);
-  padding: 6px 10px;
+  padding: 6px 12px;
   border-radius: 8px;
   box-shadow: var(--shadow-card);
 }
@@ -461,7 +517,7 @@ header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 6px;
+  padding: 0 4px;
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -489,13 +545,13 @@ header {
   background: var(--bg-glass);
   backdrop-filter: blur(10px);
   border: 1px solid var(--border-color);
-  padding: 6px 12px;
+  padding: 5px 10px;
   border-radius: 6px;
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-muted);
   display: flex;
-  gap: 16px;
+  gap: 14px;
   pointer-events: none;
 }
 
@@ -508,32 +564,41 @@ header {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
-  box-shadow: 0 0 12px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
   border: 2px solid #ffffff;
   cursor: grab;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, width 0.15s ease, height 0.15s ease;
 }
 .custom-wpt-marker:active {
   cursor: grabbing;
   transform: scale(1.25);
 }
 
+/* Adaptive Tactical Marker for High Zoom (level >= 17) */
+.zoom-micro .custom-wpt-marker {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+  border-width: 1.5px;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+}
+
 .marker-surface {
   background: linear-gradient(135deg, #10b981, #059669);
   color: #ffffff;
-  box-shadow: 0 0 16px rgba(16, 185, 129, 0.6);
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.6);
 }
 
 .marker-dive {
   background: linear-gradient(135deg, #00f0ff, #0284c7);
   color: #070b14;
-  box-shadow: 0 0 16px rgba(0, 240, 255, 0.7);
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.7);
 }
 
 /* ==========================================================================
@@ -556,12 +621,12 @@ header {
 }
 
 .bottom-profile.collapsed {
-  height: 34px;
+  height: 32px;
 }
 
 .profile-header {
-  height: 34px;
-  padding: 0 16px;
+  height: 32px;
+  padding: 0 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -583,7 +648,7 @@ header {
   flex: 1;
   position: relative;
   overflow: hidden;
-  padding: 6px 16px;
+  padding: 4px 14px;
 }
 
 #profileCanvas {
@@ -593,7 +658,31 @@ header {
 }
 
 /* ==========================================================================
-   MODAL CODE PREVIEW
+   PATTERN CARD (CALIBRATION GENERATOR)
+   ========================================================================== */
+.pattern-card {
+  background: rgba(17, 27, 49, 0.75);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pattern-card:hover {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: var(--border-hover);
+}
+.pattern-card.active {
+  background: rgba(0, 240, 255, 0.12);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 14px rgba(0, 240, 255, 0.25);
+}
+
+/* ==========================================================================
+   MODAL DIALOGS
    ========================================================================== */
 .modal-overlay {
   position: fixed;
@@ -631,7 +720,7 @@ header {
 }
 
 .modal-header {
-  padding: 14px 20px;
+  padding: 12px 18px;
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
@@ -639,7 +728,7 @@ header {
 }
 
 .modal-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 700;
   color: var(--accent-cyan);
 }
@@ -647,7 +736,7 @@ header {
 .modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  padding: 16px 18px;
   background: #060a12;
 }
 
@@ -665,7 +754,7 @@ header {
 }
 
 .modal-footer {
-  padding: 12px 20px;
+  padding: 10px 18px;
   border-top: 1px solid var(--border-color);
   display: flex;
   justify-content: flex-end;
