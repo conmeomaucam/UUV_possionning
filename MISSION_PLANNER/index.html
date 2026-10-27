@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AUV REMUS 100 - Trình Hoạch Định Quỹ Đạo & Sinh Kịch Bản MATLAB</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Leaflet Map CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+
+  <!-- Custom Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- TOP HEADER -->
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚓</div>
+      <div class="brand-title">
+        <h1>REMUS 100 MISSION PLANNER</h1>
+        <p>Hệ Thống Hoạch Định Quỹ Đạo 3D & Sinh Kịch Bản Mô Phỏng ES-EKF</p>
+      </div>
+    </div>
+
+    <div class="header-center">
+      <!-- Preset Regions -->
+      <div class="preset-selector">
+        <label for="regionSelect">Khu vực:</label>
+        <select id="regionSelect">
+          <option value="catba" selected>Vịnh Hạ Long / Cát Bà (20.8°N)</option>
+          <option value="hoabinh">Hồ Hòa Bình (Đo sâu thực tế)</option>
+          <option value="camranh">Vịnh Cam Ranh</option>
+          <option value="vungtau">Vùng biển Vũng Tàu</option>
+        </select>
+      </div>
+
+      <!-- Basemap Switcher -->
+      <div class="preset-selector">
+        <label for="basemapSelect">Bản đồ nền:</label>
+        <select id="basemapSelect">
+          <option value="googleHybrid" selected>Google Vệ Tinh (Hybrid)</option>
+          <option value="googleSat">Google Vệ Tinh Thuần</option>
+          <option value="esriSat">Esri World Imagery</option>
+          <option value="cartoDark">CartoDB Dark Matter</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn btn-secondary" onclick="loadDefaultScenario()" title="Tải lại 12 Waypoints mẫu của mô phỏng hiện tại">
+        🔄 Kịch Bản Mẫu (12 WP)
+      </button>
+
+      <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()" title="Mở file JSON đã lưu">
+        📂 Mở Dự Án
+      </button>
+      <input type="file" id="fileInput" accept=".json" style="display:none;" onchange="loadProjectJson(event)">
+
+      <button class="btn btn-secondary" onclick="saveProjectJson()" title="Lưu kịch bản ra file JSON">
+        💾 Lưu Dự Án
+      </button>
+
+      <button class="btn btn-secondary" onclick="openMatlabModal()" title="Xem trước code MATLAB sinh ra">
+        👁️ Xem Mã MATLAB
+      </button>
+
+      <button class="btn btn-emerald" onclick="downloadMatlabFile()" title="Tải file kich_ban_mission.m về máy để chạy mô phỏng">
+        ⚡ Xuất Kịch Bản MATLAB (.m)
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN APP CONTAINER -->
+  <div class="app-container">
+    
+    <!-- SIDEBAR / MISSION INSPECTOR -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-title">
+          <span>🎯</span> BẢNG ĐIỀU KHIỂN NHIỆM VỤ
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="clearAllWaypoints()">Xóa Hết</button>
+      </div>
+
+      <div class="sidebar-content">
+        <!-- Telemetry Summary Grid -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">Số Mốc Waypoints</span>
+            <div class="metric-value" id="metricWptCount">0</div>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Tổng Cự Ly Hành Trình</span>
+            <div class="metric-value" id="metricDistance">0.00 <span class="metric-unit">km</span></div>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Thời Gian Dự Kiến</span>
+            <div class="metric-value" id="metricTime">0m 0s</div>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">Độ Sâu Cực Đại</span>
+            <div class="metric-value" id="metricMaxDepth">0 <span class="metric-unit">m</span></div>
+          </div>
+          <div class="metric-card" style="grid-column: span 2;">
+            <span class="metric-label">Thời Điểm Cắt GNSS Dự Kiến (z > 0.5m)</span>
+            <div class="metric-value" id="metricGnssCut" style="color:var(--accent-amber);">0.0 <span class="metric-unit">giây</span></div>
+          </div>
+        </div>
+
+        <!-- Waypoint Table Box -->
+        <div class="section-box" style="flex: 1; display:flex; flex-direction:column;">
+          <div class="section-box-header">
+            <div class="section-box-title">
+              <span>📍</span> DANH SÁCH MỐC TOẠ ĐỘ (NED & ĐỘ SÂU)
+            </div>
+            <span style="font-size:10px; color:var(--text-dim); font-family:var(--font-mono);">Kéo thả điểm trên bản đồ</span>
+          </div>
+
+          <div class="wpt-table-container">
+            <table class="wpt-table">
+              <thead>
+                <tr>
+                  <th>Mốc</th>
+                  <th>North (x)</th>
+                  <th>East (y)</th>
+                  <th>Sâu z (m)</th>
+                  <th>U (m/s)</th>
+                  <th>Trạng thái</th>
+                  <th style="text-align:center;">Xóa</th>
+                </tr>
+              </thead>
+              <tbody id="wptTableBody">
+                <!-- Dynamic Rows Injected by JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Guidance Instruction Note -->
+        <div style="background:rgba(15,23,42,0.6); border:1px solid rgba(56,189,248,0.15); border-radius:8px; padding:10px 12px; font-size:11px; color:var(--text-muted); line-height:1.5;">
+          <b style="color:var(--accent-cyan);">💡 Hướng dẫn nhanh:</b><br>
+          1. <b>Click trên bản đồ</b> để thả thêm Waypoint mới.<br>
+          2. <b>Cầm kéo thả</b> từng điểm để chỉnh vị trí chính xác.<br>
+          3. Sửa <b>Sâu z</b> trực tiếp trong bảng: <b style="color:var(--accent-emerald);">z ≤ 0.5m</b> = Nổi (có GNSS), <b style="color:var(--accent-cyan);">z > 0.5m</b> = Lặn ngầm (mất GNSS, chạy DVL).<br>
+          4. Bấm nút <b>"Xuất Kịch Bản MATLAB"</b> để nạp vào chạy mô phỏng.
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAP VIEWPORT -->
+    <main class="map-wrapper">
+      <div id="map"></div>
+
+      <!-- Floating Map Header Control -->
+      <div class="map-floating-bar">
+        <div class="map-mode-indicator">
+          <div class="mode-dot"></div>
+          <span>Chế độ: <b>Thả Waypoint (Click bất kỳ trên mặt biển)</b></span>
+        </div>
+      </div>
+
+      <!-- Cursor Coordinate Tracker -->
+      <div class="map-cursor-info">
+        <span>Vĩ độ: <b id="cursorLat">20.800000</b></span>
+        <span>Kinh độ: <b id="cursorLon">107.050000</b></span>
+        <span>North (x): <b id="cursorNorth">+0.0 m</b></span>
+        <span>East (y): <b id="cursorEast">+0.0 m</b></span>
+      </div>
+
+      <!-- BOTTOM 2D CROSS-SECTION PROFILE DRAWER -->
+      <div class="bottom-profile" id="bottomProfile">
+        <div class="profile-header">
+          <div class="profile-title">
+            <span>📉</span> MẶT CẮT DỌC ĐỘ SÂU THEO HÀNH TRÌNH (DEPTH PROFILE)
+          </div>
+          <div>
+            <span style="font-size:10px; color:var(--text-dim); margin-right:12px;">Xanh lá: Nổi có GNSS | Xanh lơ: Lặn ngầm DVL/INS</span>
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('bottomProfile').classList.toggle('collapsed')">
+              Thu Gọn / Mở Rộng
+            </button>
+          </div>
+        </div>
+        <div class="profile-body">
+          <canvas id="profileCanvas"></canvas>
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- MODAL MATLAB CODE PREVIEW -->
+  <div class="modal-overlay" id="codeModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">📄 Mã Kịch Bản Mô Phỏng MATLAB (Tự Động Sinh)</div>
+        <button class="btn btn-secondary btn-sm" onclick="closeMatlabModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <pre class="code-box" id="matlabCodeBox"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeMatlabModal()">Đóng</button>
+        <button class="btn btn-primary" onclick="copyMatlabCode()">📋 Sao Chép Mã</button>
+        <button class="btn btn-emerald" onclick="downloadMatlabFile()">💾 Tải File .m</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet Map JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <!-- Custom App JS -->
+  <script src="app.js"></script>
+</body>
+</html>

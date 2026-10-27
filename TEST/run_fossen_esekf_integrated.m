@@ -56,31 +56,38 @@ clear integralSMCheading ALOS3D ALOSpsi LOSobserver;
 
 %% 1. CẤU HÌNH THỜI GIAN VÀ THÔNG SỐ VẬT LÝ
 h = 0.05;              % Chu kỳ trích mẫu h = 0.05 s (20 Hz)
-T_final = 1880;        % Tổng thời gian: 1880 s (480s mặt nước + 1400s lặn)
-t = 0:h:T_final;
-nTimeSteps = length(t);
-
-T_gnss_cut = 480.0;    % Cắt GNSS sau 480 giây (8 phút căn chỉnh mặt nước có GNSS)
+T_final = 1880;        % Tổng thời gian mặc định: 1880 s
+T_gnss_cut = 480.0;    % Cắt GNSS sau 480 giây mặc định
 dt_dvl = 0.20;         % Chu kỳ đo DVL = 0.2 s (5 Hz)
 dvl_step = round(dt_dvl / h); % Cập nhật DVL mỗi 4 bước mô phỏng 20 Hz
 
-% Định nghĩa các điểm chuyển hướng 3D Waypoints (Gồm 8 phút mặt nước + Nhiệm vụ lặn)
-% 1. Pha mặt nước 8 phút (z = 0 m): chạy thẳng và đổi hướng nhịp nhàng (S-curve nhẹ) để kích thích Boresight
-wpt_surface_x = [  0,   0, -30,   30, -20,   0 ];  % North (m)
-wpt_surface_y = [  0, 120, 270,  430, 580, 720 ];  % East (m)
-wpt_surface_z = [  0,   0,   0,    0,   0,   0 ];  % Down = 0m (Mặt nước)
-
-% 2. Pha lặn sâu nhiệm vụ cũ (tịnh tiến bắt đầu từ East = 720 m)
-wpt_mission_x = [ -20,  -100,     0,   200,  200,   400 ];
-wpt_mission_y = [ 920,  1320,  1670,  2020, 2520,  2920 ];
-wpt_mission_z = [  10,   100,   100,    50,   50,    50 ];
-
-wpt.pos.x = [wpt_surface_x, wpt_mission_x];
-wpt.pos.y = [wpt_surface_y, wpt_mission_y];
-wpt.pos.z = [wpt_surface_z, wpt_mission_z];
-
-% Hằng số vật lý và định vị WGS-84
+% Tọa độ gốc mặc định WGS-84 (20.8 deg N)
 lat_rad = deg2rad(20.8);
+
+% Kiểm tra xem có kịch bản tùy biến từ AUV Mission Planner hay không
+mission_file = fullfile(project_root, 'MISSION_PLANNER', 'kich_ban_mission.m');
+if exist(mission_file, 'file')
+    fprintf('[MISSION PLANNER] Phát hiện kịch bản: %s\n', mission_file);
+    run(mission_file);
+else
+    % Mặc định dùng kịch bản cơ sở
+    wpt_surface_x = [  0,   0, -30,   30, -20,   0 ];  % North (m)
+    wpt_surface_y = [  0, 120, 270,  430, 580, 720 ];  % East (m)
+    wpt_surface_z = [  0,   0,   0,    0,   0,   0 ];  % Down = 0m (Mặt nước)
+
+    wpt_mission_x = [ -20,  -100,     0,   200,  200,   400 ];
+    wpt_mission_y = [ 920,  1320,  1670,  2020, 2520,  2920 ];
+    wpt_mission_z = [  10,   100,   100,    50,   50,    50 ];
+
+    wpt.pos.x = [wpt_surface_x, wpt_mission_x];
+    wpt.pos.y = [wpt_surface_y, wpt_mission_y];
+    wpt.pos.z = [wpt_surface_z, wpt_mission_z];
+end
+
+t = 0:h:T_final;
+nTimeSteps = length(t);
+
+% Hằng số vật lý và định vị WGS-84 theo vĩ độ (đã được cập nhật nếu kịch bản có lat_rad)
 tan_lat = tan(lat_rad);
 height = 0;
 gravity = gravity_fossen(lat_rad, height); % Tính trọng lực chuẩn theo vĩ độ WGS-84 Somigliana
