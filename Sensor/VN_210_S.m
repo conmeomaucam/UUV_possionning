@@ -18,6 +18,7 @@ function varargout = VN_210_S(mode, varargin)
 %   state = VN_210_S('init', spec, bg0, ba0, seed);
 %   [gyro_meas, accel_meas, state] = VN_210_S('imu', spec, state, w_ib_true, f_b_true, dt);
 %   [gnss_meas, has_yaw] = VN_210_S('gnss', spec, pos_ned, vel_ned, yaw, state);
+%   mag_meas = VN_210_S('mag', spec, Cbn_true, dt, state);   % Từ kế 3 trục (hệ thân)
 %   [meas, is_valid, state, info] = VN_210_S('step', true_pos, true_vel, true_att, dt, state, spec, ...);
 
 if ~exist('gravity_fossen', 'file')
@@ -53,6 +54,10 @@ switch lower(char(mode))
         % Cú pháp: [gnss_meas, has_valid_yaw] = VN_210_S('gnss', spec, pos_ned, vel_ned, yaw, state)
         [varargout{1}, varargout{2}] = gnss_step(varargin{:});
 
+    case 'mag'
+        % Cú pháp: mag_meas = VN_210_S('mag', spec, Cbn_true, dt, state)
+        varargout{1} = mag_step(varargin{:});
+
     case {'step', 'measure'}
         % Cú pháp loosely-coupled EKF nội
         [varargout{1}, varargout{2}, varargout{3}, varargout{4}] = ...
@@ -73,7 +78,7 @@ g0 = 9.80665;
 
 s.ten = 'VectorNav VN-210-S Tactical-Grade GNSS/INS';
 s.version = 'Product Brief v12-0038-R1, 2024';
-s.co_tu_ke = false;                    % Mặc định tắt từ kế trên UUV do nhiễu động cơ và ắc quy
+s.co_tu_ke = true;                     % BẬT từ kế ở chế độ LÝ TƯỞNG (đã hiệu chuẩn hard/soft-iron hoàn hảo)
 
 % ── A. CẤU TRÚC PHÂN CẤP TƯƠNG THÍCH CHUẨN ES-EKF & GEO-FOG 3D ──
 % Con quay hồi chuyển (Tactical MEMS Gyroscope)
@@ -97,6 +102,19 @@ s.gnss.vel         = 0.02;                       % Velocity Accuracy: 0.02 m/s
 s.gnss.heading     = 0.075 * d2r;                % Dynamic Heading: 0.075 deg khi có chuyển động
 s.gnss.rate_hz     = 5;                          % Tần số cập nhật đo đạc vệ tinh thực tế: 5 Hz
 s.gnss.single_antenna_mode = true;               % Cờ mô phỏng đặc tính đơn ăng-ten trên UUV
+
+% Từ kế 3 trục (Magnetometer) - mô hình LÝ TƯỞNG
+%   Lý tưởng = hard/soft-iron đã hiệu chuẩn sạch, không có nhiễu từ động cơ, chỉ còn nhiễu trắng.
+%   Muốn thử không lý tưởng: gán hard_iron khác 0 (khi đó bộ lọc 19 trạng thái sẽ bị lệch
+%   hướng vì chưa có trạng thái ước lượng lệch từ kế).
+s.mag.noise_density = 140e-6;                    % 140 uGauss/sqrt(Hz) (datasheet, mục B bên dưới) -> Gauss/sqrt(Hz)
+s.mag.rate_hz       = 5;                         % Tần số đưa vào bộ lọc (Hz)
+s.mag.hard_iron     = [0; 0; 0];                 % Lệch cố định dư (Gauss) - LÝ TƯỞNG = 0
+% Từ trường trái đất tại vùng hoạt động (~20.8 do N, Bắc Bộ Việt Nam)
+% GIẢ ĐỊNH: giá trị xấp xỉ, cần tra lại theo mô hình WMM/IGRF cho tọa độ thật.
+s.mag.field_total   = 0.45;                      % Cường độ tổng F (Gauss)
+s.mag.inclination   = 32.0 * d2r;                % Độ từ khuynh I (rad), dương = chỉ xuống
+s.mag.declination   = -1.0 * d2r;                % Độ từ thiên D (rad), dương = lệch Đông
 
 % ── B. THÔNG SỐ CHI TIẾT THEO DATASHEET PHẦN CỨNG ───────────────────
 % Kích thước, khối lượng, điện năng (SWaP)
@@ -329,6 +347,51 @@ end
 z = [pos_ned + pos_noise; ...
      vel_ned + vel_noise; ...
      yaw_meas];
+end
+
+%% ===================================================================
+%  4b. SINH SỐ ĐO TỪ KẾ 3 TRỤC (MAG_STEP) - DÙNG CẢ KHI NỔI VÀ KHI LẶN
+%% ===================================================================
+function m_body = mag_step(spec, Cbn_true, dt, state)
+% CÚ PHÁP:
+%   m_body = mag_step(spec, Cbn_true, dt, state)
+%
+% ĐẦU VÀO:
+%   Cbn_true - Ma trận xoay THẬT từ thân sang NED (3x3)
+%   dt       - Chu kỳ lấy mẫu từ kế (s)
+%   state    - Trạng thái cảm biến (để lấy luồng số ngẫu nhiên, tùy chọn)
+%
+% ĐẦU RA:
+%   m_body   - Từ trường đo được trong hệ thân [m_x; m_y; m_z] (Gauss)
+%
+% MÔ HÌNH: m_body = Cbn_true' * m_NED + hard_iron + nhiễu trắng
+%   Nước biển không chắn từ trường trái đất đáng kể ở độ sâu 100 m, nên cùng một
+%   mô hình dùng được cho cả trên mặt nước và khi lặn.
+
+if nargin < 4 || isempty(state) || ~isfield(state, 'rng_stream') || isempty(state.rng_stream)
+    stream = RandStream.getGlobalStream();
+else
+    stream = state.rng_stream;
+end
+
+% 1. Vector từ trường trái đất trong hệ NED từ (F, I, D)
+F = spec.mag.field_total;
+I = spec.mag.inclination;
+D = spec.mag.declination;
+H_horiz = F * cos(I);                       % Thành phần nằm ngang
+m_ned = [H_horiz * cos(D); ...              % Bắc
+         H_horiz * sin(D); ...              % Đông
+         F * sin(I)];                       % Xuống
+
+% 2. Chiếu sang hệ thân theo tư thế thật
+m_true_body = Cbn_true' * m_ned;
+
+% 3. Nhiễu trắng theo mật độ nhiễu datasheet (cùng quy ước với IMU: sigma = density / sqrt(dt))
+sigma_mag = spec.mag.noise_density / sqrt(dt);
+m_body = m_true_body + spec.mag.hard_iron + sigma_mag * randn(stream, 3, 1);
+
+% 4. Bão hòa theo dải đo phần cứng (+-2.5 Gauss)
+m_body = min(max(m_body, -spec.mag_range_gauss), spec.mag_range_gauss);
 end
 
 %% ===================================================================

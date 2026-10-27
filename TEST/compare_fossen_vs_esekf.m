@@ -83,7 +83,7 @@ cov_scale_pct = e_data.cov_scale_hist * 100;
 
 %% 2. BIỂU ĐỒ 1: QUỸ ĐẠO 3 ĐƯỜNG RIÊNG BIỆT (3D, MẶT BẰNG 2D, TRẮC DỌC VÀ ĐỘ SÂU THEO THỜI GIAN)
 fig1 = figure('Name', 'So Sanh 3 Duong Quy Dao: Fossen vs Tau That vs ES-EKF', ...
-    'Position', [40, 40, 1400, 900], 'Visible', 'off');
+    'Position', [40, 40, 1400, 900], 'Visible', 'on');
 
 % Subplot 1: Không gian 3D
 subplot(2, 2, 1);
@@ -136,13 +136,15 @@ title('4. Dien bien do sau Down theo thoi gian', 'FontWeight', 'bold');
 legend('1. Fossen Standalone', '2. Tau that', '3. ES-EKF uoc luong', 'Cat GNSS', 'Location', 'best');
 
 fig1_path = fullfile(script_dir, 'fig_so_sanh_quy_dao.png');
+fig1_fig_path = fullfile(script_dir, 'fig_so_sanh_quy_dao.fig');
 saveas(fig1, fig1_path);
-close(fig1);
-fprintf('Đã lưu biểu đồ 3 đường quỹ đạo vào: %s\n', fig1_path);
+savefig(fig1, fig1_fig_path);
+% Giữ nguyên figure 1 trên màn hình cho người dùng xem và thao tác trực tiếp
+fprintf('Đã hiển thị Figure 1 trên màn hình và lưu file:\n  + PNG: %s\n  + FIG: %s\n', fig1_path, fig1_fig_path);
 
 %% 3. BIỂU ĐỒ 2: SAI SỐ THEO TỪNG PHƯƠNG (NORTH, EAST) VÀ ĐỘ SÂU (DOWN)
 fig2 = figure('Name', 'Sai So Tung Phuong Va Do Sau', ...
-    'Position', [60, 60, 1350, 850], 'Visible', 'off');
+    'Position', [60, 60, 1350, 850], 'Visible', 'on');
 
 % 1. Phương Bắc (North Drift)
 subplot(2, 2, 1);
@@ -185,13 +187,15 @@ title('4. Tong hop sai so vi tri khong gian 3D', 'FontWeight', 'bold');
 legend('Tong lech: Tau that - Fossen', 'Sai so dinh vi: Tau that - ES-EKF', 'Location', 'best');
 
 fig2_path = fullfile(script_dir, 'fig_so_sanh_sai_so_tung_phuong.png');
+fig2_fig_path = fullfile(script_dir, 'fig_so_sanh_sai_so_tung_phuong.fig');
 saveas(fig2, fig2_path);
-close(fig2);
-fprintf('Đã lưu biểu đồ sai số từng phương và độ sâu vào: %s\n', fig2_path);
+savefig(fig2, fig2_fig_path);
+% Giữ nguyên figure 2 trên màn hình
+fprintf('Đã hiển thị Figure 2 trên màn hình và lưu file:\n  + PNG: %s\n  + FIG: %s\n', fig2_path, fig2_fig_path);
 
 %% 4. BIỂU ĐỒ 3: SO SÁNH VẬN TỐC THEO 3 PHƯƠNG (v_North, v_East, v_Down)
 fig3 = figure('Name', 'So Sanh Van Toc Theo 3 Phuong', ...
-    'Position', [80, 80, 1350, 850], 'Visible', 'off');
+    'Position', [80, 80, 1350, 850], 'Visible', 'on');
 
 % 1. Vận tốc phương Bắc (v_North)
 subplot(2, 2, 1);
@@ -239,13 +243,15 @@ title('4. Sai so van toc ES-EKF (Tau that - Uoc luong)', 'FontWeight', 'bold');
 legend('Err v_N', 'Err v_E', 'Err v_D', 'Tong |v_{err}|', 'Location', 'best');
 
 fig3_path = fullfile(script_dir, 'fig_so_sanh_van_toc_3_phuong.png');
+fig3_fig_path = fullfile(script_dir, 'fig_so_sanh_van_toc_3_phuong.fig');
 saveas(fig3, fig3_path);
-close(fig3);
-fprintf('Đã lưu biểu đồ vận tốc theo 3 phương vào: %s\n', fig3_path);
+savefig(fig3, fig3_fig_path);
+% Giữ nguyên figure 3 trên màn hình
+fprintf('Đã hiển thị Figure 3 trên màn hình và lưu file:\n  + PNG: %s\n  + FIG: %s\n', fig3_path, fig3_fig_path);
 
 %% 5. BIỂU ĐỒ 4: HỘI TỤ BORESIGHT VÀ SCALE FACTOR DVL
 fig4 = figure('Name', 'Hoi Tu Hieu Chuan Boresight va Scale Factor', ...
-    'Position', [100, 100, 1200, 800], 'Visible', 'off');
+    'Position', [100, 100, 1200, 800], 'Visible', 'on');
 
 % Boresight Roll
 subplot(2, 2, 1);
@@ -296,9 +302,12 @@ title('Hieu chuan he so ti le Scale Factor DVL', 'FontWeight', 'bold');
 legend('Uoc luong Scale', '+3\sigma', '-3\sigma', 'Gia tri that', 'Location', 'best');
 
 fig4_path = fullfile(script_dir, 'fig_so_sanh_boresight_scale.png');
+fig4_fig_path = fullfile(script_dir, 'fig_so_sanh_boresight_scale.fig');
 saveas(fig4, fig4_path);
-close(fig4);
-fprintf('Đã lưu biểu đồ hội tụ hiệu chuẩn vào: %s\n', fig4_path);
+savefig(fig4, fig4_fig_path);
+% Giữ nguyên figure 4 trên màn hình
+drawnow;
+fprintf('Đã hiển thị Figure 4 trên màn hình và lưu file:\n  + PNG: %s\n  + FIG: %s\n', fig4_path, fig4_fig_path);
 
 %% 6. BÁO CÁO TỔNG HỢP VÀ GHI FILE
 final_err_bs_deg = abs(bs_est_deg(end, :) - bs_true_deg);

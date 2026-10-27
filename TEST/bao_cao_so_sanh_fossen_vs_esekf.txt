@@ -11,13 +11,13 @@
      + Duong 3: ES-EKF uoc luong (Thuat toan loc 19 trang thai)
 
 2. KET QUA HIEN CHUAN TRUC TUYEN:
-   - Boresight Roll : Uoc =  1.683 deg | That =  1.500 deg | Sai so =  0.183 deg
-   - Boresight Pitch: Uoc = -1.949 deg | That = -2.000 deg | Sai so =  0.051 deg
-   - Boresight Yaw  : Uoc =  3.017 deg | That =  3.000 deg | Sai so =  0.017 deg
-   - Scale Factor   : Uoc =  1.520 %   | That =  1.500 %   | Sai so =  0.020 %
+   - Boresight Roll : Uoc =  1.243 deg | That =  1.500 deg | Sai so =  0.257 deg
+   - Boresight Pitch: Uoc = -2.038 deg | That = -2.000 deg | Sai so =  0.038 deg
+   - Boresight Yaw  : Uoc =  3.865 deg | That =  3.000 deg | Sai so =  0.865 deg
+   - Scale Factor   : Uoc =  1.483 %   | That =  1.500 %   | Sai so =  0.017 %
 
 3. SAI SO VI TRI VA VAN TOC CUOI CUNG:
-   - Sai so vi tri 3D noi bo (Tau that - ES-EKF): 1.6225 m
-   - Do lech vi tri 3D (Tau that - Fossen ly tuong) : 1.5032 m
-   - Sai so van toc 3D noi bo (Tau that - ES-EKF): 0.0067 m/s
+   - Sai so vi tri 3D noi bo (Tau that - ES-EKF): 37.1203 m
+   - Do lech vi tri 3D (Tau that - Fossen ly tuong) : 38.1738 m
+   - Sai so van toc 3D noi bo (Tau that - ES-EKF): 0.0280 m/s
 ========================================================================================

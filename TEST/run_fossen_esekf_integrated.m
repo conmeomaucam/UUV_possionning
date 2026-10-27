@@ -134,8 +134,8 @@ dvl_spec = DVL_A125('spec');
 dvl_noise_floor = dvl_spec.noise_floor;       % Nhiễu sàn DVL A125 (m/s)
 dvl_noise_slope = dvl_spec.noise_slope;      % Nhiễu tỉ lệ vận tốc DVL
 
-% Vector cấu hình 20 phần tử truyền cho esekf19_step
-cfg = zeros(20, 1);
+% Vector cấu hình 23 phần tử truyền cho esekf19_step (21: khóa hiệu chuẩn, 22-23: từ kế)
+cfg = zeros(23, 1);
 cfg(1) = h;
 cfg(2) = gravity;
 cfg(3:5) = w_ie_ned;
@@ -152,6 +152,26 @@ cfg(17) = sigma_gps_yaw;
 cfg(18) = sigma_depth;
 cfg(19) = acc_bias_tau;
 cfg(20) = sigma_arw;
+cfg(21) = 0;            % Không khóa hiệu chuẩn Boresight/Scale trong kịch bản này
+
+% --- Từ kế (chỉ có ở thiết bị khai báo spec.mag và bật co_tu_ke, VD: VN-210-S) ---
+use_mag = isfield(ins_spec, 'mag') && isfield(ins_spec, 'co_tu_ke') && ins_spec.co_tu_ke;
+if use_mag
+    mag_H_horiz = ins_spec.mag.field_total * cos(ins_spec.mag.inclination); % Thành phần ngang (Gauss)
+    % Nhiễu hướng do nhiễu trắng từ kế: sigma_m / H (rad), lấy mẫu 5 Hz
+    sigma_mag_head_noise = (ins_spec.mag.noise_density / sqrt(dt_dvl)) / mag_H_horiz;
+    % Sai số bù nghiêng: sai số roll/pitch ước lượng lọt vào hướng qua tan(độ từ khuynh)
+    % (lấy 0.05 deg = sai số roll/pitch tĩnh theo datasheet VN-210-S)
+    sigma_mag_tilt = tan(ins_spec.mag.inclination) * deg2rad(ins_spec.pitch_roll_static_deg);
+    sigma_mag_yaw = sqrt(sigma_mag_head_noise^2 + sigma_mag_tilt^2);
+    cfg(22) = ins_spec.mag.declination;   % LÝ TƯỞNG: bộ lọc biết chính xác độ từ thiên (WMM)
+    cfg(23) = sigma_mag_yaw;
+    fprintf('Tu ke             : BAT (ly tuong), sigma huong = %.3f deg, dung ca khi noi va khi lan\n', ...
+        rad2deg(sigma_mag_yaw));
+else
+    sigma_mag_yaw = NaN;
+    fprintf('Tu ke             : TAT\n');
+end
 
 noise_cfg = [sigma_vrw; sigma_arw; acc_bias_sigma; acc_bias_tau; ...
     gyro_bias_rw; scale_rw; boresight_rw; h];
@@ -205,40 +225,46 @@ M_theta = deg2rad(20);
 R_switch = 20;
 K_f = 0.5;
 
-%% 3. KHỞI TẠO BỘ LỌC ES-EKF 19 TRẠNG THÁI (REAL COLD START - LOẠI BỎ ORACLE CHEAT)
-% 3.1. Sai số căn chỉnh tư thế ban đầu (Coarse Alignment):
-% Đối với VN-210-S (Single-Antenna MEMS, từ kế tắt), khi bật máy chưa chuyển động,
-% góc hướng Yaw chưa được khóa chính xác, mang sai số căn chỉnh thô ban đầu ~2.5 deg.
-% Góc Roll và Pitch được căn chỉnh sơ bộ qua vector trọng trường gia tốc kế với sai số ~0.2 deg.
-phi_init_err   = deg2rad(0.2) * randn();
-theta_init_err = deg2rad(0.2) * randn();
-psi_init_err   = deg2rad(2.5); % Sai số căn chỉnh hướng thô ban đầu 2.5 độ
-initial_rpy    = [phi + phi_init_err; theta + theta_init_err; psi + psi_init_err];
+%% 3. THIẾT LẬP CĂN CHỈNH BAN ĐẦU (ALIGNMENT COLD START - LOẠI BỎ ORACLE CHEAT)
+% Không dùng giá trị thật (Ground Truth) để khởi tạo bộ lọc.
+% Quy trình căn chỉnh gồm 3 pha:
+%   Pha 1: Leveling bằng gia tốc kế (tính roll0, pitch0)
+%   Pha 2: Hướng thô (ưu tiên theo nguồn có sẵn trên thiết bị):
+%          (a) Từ kế bù nghiêng bằng roll0/pitch0 (VN-210-S)
+%          (b) Hướng GNSS 2 ăng-ten (GEO-FOG 3D Dual)
+%          (c) COG (GNSS) - Crab (DVL) khi tàu có vận tốc (dự phòng)
+%   Pha 3: Khởi tạo ES-EKF và chuyển sang dẫn đường khép vòng
 
-[state_est, P_est, Q] = esekf19_init(initial_rpy, gravity, noise_cfg);
+% Tham số và bộ đếm căn chỉnh
+align_phase   = 1;
+accel_sum     = zeros(3, 1);
+level_count   = 0;
+N_level       = round(2.0 / h);       % 2 giây đầu lấy trung bình gia tốc kế (200 mẫu)
 
-% 3.2. Vị trí ban đầu: Lấy từ phép đo định vị GNSS RTK đầu tiên tại mặt nước (có nhiễu thực tế)
-gnss_pos_init_noise = [ins_spec.gnss.pos_h * randn(); ins_spec.gnss.pos_h * randn; ins_spec.gnss.pos_v * randn()];
-state_est(1:3) = [xn; yn; zn] + gnss_pos_init_noise;
+head_sin      = 0;
+head_cos      = 0;
+head_count    = 0;
+N_head_epochs = 5;                    % 5 chu kỳ GNSS/DVL (1 giây ở 5 Hz)
+v_align_min   = 0.5;                  % Vận tốc tối thiểu để COG có ý nghĩa (m/s)
 
-% 3.3. Vận tốc ban đầu: Lấy từ phép đo vận tốc GNSS Doppler đầu tiên (có nhiễu thực tế)
-gnss_vel_init_noise = ins_spec.gnss.vel * randn(3, 1);
-state_est(4:6) = eul2cbn_local(phi, theta, psi) * [U; 0; 0] + gnss_vel_init_noise;
+sigma_rp0     = deg2rad(0.5);         % Bất định góc nghiêng sau leveling (0.5 deg)
+sigma_bs0     = deg2rad(3.0);         % Bất định boresight ban đầu (3 deg)
 
-% 3.4. Cold Start cảm biến DVL: Chưa biết Boresight và Scale factor
-state_est(17)    = 0.0;             % Scale factor khởi tạo = 0 (Sai lệch thật = +1.5%)
-state_est(18:20) = [0.0; 0.0; 0.0]; % Boresight khởi tạo = [0; 0; 0] (Thật = [1.5; -2.0; 3.0] deg)
-
-% 3.5. Ma trận hiệp phương sai ban đầu P0 CHUẨN XÁC, PHẢN ÁNH ĐÚNG BẤT ĐỊNH THỐNG KÊ:
-P_est(1:2, 1:2)     = (ins_spec.gnss.pos_h)^2 * eye(2); % Bất định vị trí ngang bằng độ chính xác GNSS
-P_est(3, 3)         = (bar_spec.sigma_depth_nominal)^2;  % Bất định độ sâu bằng độ chính xác áp kế
-P_est(4:6, 4:6)     = (ins_spec.gnss.vel * 2)^2 * eye(3);% Bất định vận tốc theo GNSS (mở cổng 2-sigma)
-P_est(7:8, 7:8)     = deg2rad(0.5)^2 * eye(2);          % Bất định Roll/Pitch 0.5 deg (gióng theo trọng trường)
-P_est(9, 9)         = deg2rad(3.5)^2;                   % Bất định Heading 3.5 deg (bao trọn sai số ban đầu 2.5 deg)
-P_est(10:12, 10:12) = (2.0e-3 * gravity)^2 * eye(3);    % Bất định bias gia tốc 2.0 mg (bao trọn bias thật 1.2 mg)
-P_est(13:15, 13:15) = (deg2rad(0.6)/3600)^2 * eye(3);   % Bất định bias con quay 0.6 deg/hr
-P_est(16, 16)       = (0.03)^2;                         % Độ lệch chuẩn scale 3%
-P_est(17:19, 17:19) = deg2rad(3.0)^2 * eye(3);          % Độ lệch chuẩn Boresight 3.0 deg
+% Trạng thái ước lượng ban đầu (trước khi căn chỉnh xong, đặt NaN hoặc 0)
+state_est = zeros(20, 1);
+P_est     = eye(19);
+Q         = zeros(19, 19);
+p_hat     = nan(3, 1);
+v_hat     = nan(3, 1);
+phi_hat   = NaN;
+theta_hat = NaN;
+psi_hat   = NaN;
+scale_hat = NaN;
+bs_hat    = nan(3, 1);
+roll0     = 0;
+pitch0    = 0;
+psi0      = 0;
+t_align   = NaN;
 
 % Khởi tạo các bias cảm biến thực tế
 % Bias bật máy (turn-on) GIẢ ĐỊNH, dùng chung cho mọi cảm biến để so sánh công bằng
@@ -250,8 +276,8 @@ bar_state = Bar_10XT('init', bar_spec);
 % Bộ đệm chẩn đoán
 bg_true_hist = zeros(nTimeSteps, 3);
 bg_est_hist  = zeros(nTimeSteps, 3);
-nis_hist     = zeros(nTimeSteps, 3);
-acc_hist     = nan(nTimeSteps, 3);   % 1 = chấp nhận, 0 = từ chối, NaN = không có phép đo
+nis_hist     = zeros(nTimeSteps, 4);  % [GNSS, Depth, DVL, MAG]
+acc_hist     = nan(nTimeSteps, 4);   % 1 = chấp nhận, 0 = từ chối, NaN = không có phép đo
 
 % Bộ đệm lưu vết trạng thái tích hợp
 pos_true_hist = zeros(nTimeSteps, 3);
@@ -309,7 +335,8 @@ for i = 1:nTimeSteps
     gnss_meas = zeros(7, 1);
     depth_meas = 0.0;
     dvl_meas = zeros(3, 1);
-    flags = [0; 0; 0];
+    mag_meas = zeros(3, 1);
+    flags = [0; 0; 0; 0];   % [GNSS; Depth; DVL; MAG]
 
     % Cập nhật DVL và Depth theo chu kỳ trích mẫu 5 Hz
     if mod(i, dvl_step) == 0
@@ -328,16 +355,29 @@ for i = 1:nTimeSteps
             flags(3) = 1;
         end
 
+        % Từ kế 3 trục 5 Hz: có CẢ khi nổi và khi lặn (nước biển không chắn từ trường)
+        if use_mag
+            mag_meas = sensor_fn('mag', ins_spec, Cbn_true, dt_dvl);
+            flags(4) = 1;
+        end
+
         % GNSS RTK ở mặt nước (chỉ có khi t <= T_gnss_cut và ở mặt nước zn <= 0.5m)
         if t(i) <= T_gnss_cut && zn <= 0.5
-            gnss_meas = sensor_fn('gnss', ins_spec, [xn; yn; zn], v_ned_true, psi);
+            if isfield(ins_spec.gnss, 'single_antenna_mode') && ins_spec.gnss.single_antenna_mode
+                gnss_meas = sensor_fn('gnss', ins_spec, [xn; yn; zn], v_ned_true, NaN);
+            else
+                gnss_meas = sensor_fn('gnss', ins_spec, [xn; yn; zn], v_ned_true, psi);
+            end
             flags(1) = 1;
+            cfg(21) = 0; % Mặt nước có GNSS: cho phép hiệu chuẩn Boresight & Scale
+        else
+            cfg(21) = 1; % Lặn ngầm mất GNSS: KHÓA hiệu chuẩn Boresight & Scale để tránh trôi dạt góc khi cơ động
         end
     end
 
     % 4.4. CĂN CHỈNH BAN ĐẦU (chỉ từ số đo) HOẶC 1 BƯỚC LỌC ES-EKF
-    update_status = zeros(3, 1);
-    nis = zeros(3, 1);
+    update_status = zeros(numel(flags), 1);
+    nis = zeros(numel(flags), 1);
     filter_ran = false;
 
     if align_phase == 1
@@ -352,14 +392,34 @@ for i = 1:nTimeSteps
         end
 
     elseif align_phase == 2
-        % --- Pha 2: Heading thô = COG (GNSS) - góc dạt (DVL) ---
-        if flags(1) ~= 0 && flags(3) ~= 0
-            v_gnss_h    = gnss_meas(4:5);                              % [vN; vE] đo bằng GNSS
-            v_dvl_level = eul2cbn_local(roll0, pitch0, 0) * dvl_meas;  % DVL chiếu về mặt phẳng ngang
-            if norm(v_gnss_h) > v_align_min && norm(v_dvl_level(1:2)) > v_align_min
-                cog  = atan2(v_gnss_h(2), v_gnss_h(1));
-                crab = atan2(v_dvl_level(2), v_dvl_level(1));
-                psi_sample = cog - crab;
+        % --- Pha 2: Hướng thô từ nguồn đo có sẵn (cần GNSS để khởi tạo vị trí/vận tốc) ---
+        if flags(1) ~= 0
+            psi_sample = NaN;
+            if use_mag && flags(4) ~= 0
+                % (a) Từ kế: bù nghiêng bằng roll0/pitch0 từ leveling rồi tính hướng
+                %     m_level = Ry(pitch0)*Rx(roll0)*m_body = Rz(yaw)'*m_NED
+                %     => yaw = atan2(-m_level(2), m_level(1)) + độ từ thiên
+                Rx0 = [1, 0, 0; 0, cos(roll0), -sin(roll0); 0, sin(roll0), cos(roll0)];
+                Ry0 = [cos(pitch0), 0, sin(pitch0); 0, 1, 0; -sin(pitch0), 0, cos(pitch0)];
+                m_level = Ry0 * Rx0 * mag_meas;
+                psi_sample = atan2(-m_level(2), m_level(1)) + ins_spec.mag.declination;
+                head_src = 'tu ke';
+            elseif isfinite(gnss_meas(7))
+                % (b) GNSS 2 ăng-ten đo hướng trực tiếp
+                psi_sample = gnss_meas(7);
+                head_src = 'GNSS 2 ang-ten';
+            elseif flags(3) ~= 0
+                % (c) Dự phòng: COG (GNSS) - góc dạt (DVL), chỉ khi tàu đủ vận tốc
+                v_gnss_h    = gnss_meas(4:5);
+                v_dvl_level = eul2cbn_local(roll0, pitch0, 0) * dvl_meas;
+                if norm(v_gnss_h) > v_align_min && norm(v_dvl_level(1:2)) > v_align_min
+                    psi_sample = atan2(v_gnss_h(2), v_gnss_h(1)) - atan2(v_dvl_level(2), v_dvl_level(1));
+                    head_src = 'COG - crab';
+                end
+            end
+
+            if isfinite(psi_sample)
+                % Trung bình góc trên vòng tròn (tránh lỗi cuộn -pi/pi)
                 head_sin = head_sin + sin(psi_sample);
                 head_cos = head_cos + cos(psi_sample);
                 head_count = head_count + 1;
@@ -367,12 +427,21 @@ for i = 1:nTimeSteps
                 if head_count >= N_head_epochs
                     psi0 = atan2(head_sin, head_cos);
 
-                    % Bất định heading suy ra từ chính cơ chế đo:
-                    %   boresight yaw DVL chưa biết (sigma_bs0) + nhiễu vận tốc GNSS/DVL
-                    V_align = norm(v_gnss_h);
-                    sigma_dvl_align = dvl_noise_floor + dvl_noise_slope * V_align;
-                    sigma_head_meas = sqrt(sigma_gps_vel^2 + sigma_dvl_align^2) / V_align / sqrt(head_count);
-                    sigma_psi0 = sqrt(sigma_bs0^2 + sigma_head_meas^2);
+                    % Bất định hướng ban đầu suy ra từ chính cơ chế đo đã dùng
+                    switch head_src
+                        case 'tu ke'
+                            % Nhiễu từ kế (giảm theo số mẫu) + sai số bù nghiêng do roll0/pitch0
+                            sigma_psi0 = sqrt(sigma_mag_head_noise^2 / head_count + ...
+                                (tan(ins_spec.mag.inclination) * sigma_rp0)^2);
+                        case 'GNSS 2 ang-ten'
+                            sigma_psi0 = sigma_gps_yaw / sqrt(head_count);
+                        otherwise
+                            % Boresight yaw DVL chưa biết (sigma_bs0) + nhiễu vận tốc GNSS/DVL
+                            V_align = norm(gnss_meas(4:5));
+                            sigma_dvl_align = dvl_noise_floor + dvl_noise_slope * V_align;
+                            sigma_head_meas = sqrt(sigma_gps_vel^2 + sigma_dvl_align^2) / V_align / sqrt(head_count);
+                            sigma_psi0 = sqrt(sigma_bs0^2 + sigma_head_meas^2);
+                    end
 
                     % Khởi tạo ES-EKF hoàn toàn từ số đo
                     [state_est, P_est, Q] = esekf19_init([roll0; pitch0; psi0], gravity, noise_cfg);
@@ -397,6 +466,9 @@ for i = 1:nTimeSteps
                     P_est(16, 16)       = (0.03)^2;                       % Scale 3%
                     P_est(17:19, 17:19) = sigma_bs0^2 * eye(3);           % Boresight 3 deg
 
+                    p_hat = state_est(1:3);
+                    v_hat = state_est(4:6);
+
                     % Autopilot bắt đầu từ hướng ĐO ĐƯỢC
                     psi_d = psi0; r_d = 0;
                     theta_d = 0;  q_d = 0;
@@ -407,6 +479,13 @@ for i = 1:nTimeSteps
                     psi0_err_deg   = rad2deg(ssa(psi0 - psi));
                     roll0_err_deg  = rad2deg(ssa(roll0 - phi));
                     pitch0_err_deg = rad2deg(ssa(pitch0 - theta));
+                    if ~quiet
+                        fprintf('Căn chỉnh xong tại t = %.2f s (nguon huong: %s):\n', t_align, head_src);
+                        fprintf('  Roll0  = %6.2f deg (sai so = %6.2f deg)\n', rad2deg(roll0), roll0_err_deg);
+                        fprintf('  Pitch0 = %6.2f deg (sai so = %6.2f deg)\n', rad2deg(pitch0), pitch0_err_deg);
+                        fprintf('  Psi0   = %6.2f deg (sai so = %6.2f deg, 1-sigma P0 = %6.2f deg)\n', ...
+                            rad2deg(psi0), psi0_err_deg, rad2deg(sigma_psi0));
+                    end
                 end
             end
         end
@@ -417,7 +496,7 @@ for i = 1:nTimeSteps
         cfg(2) = gravity_fossen(lat_rad, p_hat(3));
         [state_est, P_est, update_status, nis] = esekf19_step( ...
             state_est, P_est, Q, gyro_meas, accel_meas, ...
-            gnss_meas, depth_meas, dvl_meas, flags, cfg);
+            gnss_meas, depth_meas, dvl_meas, flags, cfg, mag_meas);
         filter_ran = true;
     end
 
@@ -452,6 +531,7 @@ for i = 1:nTimeSteps
         delta_s = sat(delta_s, delta_max);
     else
         % Đang căn chỉnh: chưa có ước lượng, giữ bánh lái và cánh lặn ở 0
+        p_hat = nan(3, 1);
         v_hat = nan(3, 1);
         phi_hat = NaN; theta_hat = NaN; psi_hat = NaN;
         scale_hat = NaN; bs_hat = nan(3, 1);
@@ -496,16 +576,24 @@ for i = 1:nTimeSteps
     euler_est_hist(i, :)     = [phi_hat, theta_hat, psi_hat];
     boresight_est_hist(i, :) = bs_hat';
     scale_est_hist(i)        = scale_hat;
-    cov_bs_hist(i, :)        = sqrt(diag(P_est(17:19, 17:19)))';
-    cov_scale_hist(i)        = sqrt(P_est(16, 16));
-    cov_pos_hist(i, :)       = sqrt(diag(P_est(1:3, 1:3)))';
-    cov_euler_hist(i, :)     = sqrt(diag(P_est(7:9, 7:9)))';
+    if align_phase == 3
+        cov_bs_hist(i, :)        = sqrt(diag(P_est(17:19, 17:19)))';
+        cov_scale_hist(i)        = sqrt(P_est(16, 16));
+        cov_pos_hist(i, :)       = sqrt(diag(P_est(1:3, 1:3)))';
+        cov_euler_hist(i, :)     = sqrt(diag(P_est(7:9, 7:9)))';
+        bg_est_hist(i, :)        = state_est(14:16)';
+    else
+        cov_bs_hist(i, :)        = nan(1, 3);
+        cov_scale_hist(i)        = NaN;
+        cov_pos_hist(i, :)       = nan(1, 3);
+        cov_euler_hist(i, :)     = nan(1, 3);
+        bg_est_hist(i, :)        = nan(1, 3);
+    end
     ui_hist(i, :)            = [delta_r, delta_s, n_p];
     alos_hist(i, :)          = [y_e, z_e, alpha_c_hat, beta_c_hat];
     bg_true_hist(i, :)       = imu_state.bg_total';
-    bg_est_hist(i, :)        = state_est(14:16)';
-    nis_hist(i, :)           = nis';
-    acc_row = nan(1, 3);
+    nis_hist(i, 1:numel(nis)) = nis';
+    acc_row = nan(1, numel(flags));
     if filter_ran
         acc_row(flags' ~= 0) = update_status(flags ~= 0)';
     end
@@ -539,20 +627,57 @@ fprintf('Đã lưu dữ liệu tích hợp vào: %s\n', save_path);
 
 %% 6. VẼ ĐỒ THỊ KẾT QUẢ TÍCH HỢP VÀ HỘI TỤ HIỆU CHUẨN
 fig = figure('Name', 'Integrated Fossen REMUS 100 with ES-EKF Calibration', ...
-    'Position', [50, 50, 1300, 850], 'Visible', 'off');
+    'Position', [50, 50, 1300, 850], 'Visible', 'on');
 
-% Đồ thị 3D quỹ đạo thực tế và quỹ đạo ước lượng
+% Đọc dữ liệu quỹ đạo chuẩn Fossen Standalone (lý tưởng) để vẽ đối chứng
+fossen_file = fullfile(script_dir, 'ket_qua_fossen_standalone.mat');
+has_fossen = false;
+if exist(fossen_file, 'file')
+    try
+        f_data = load(fossen_file);
+        pos_fossen = f_data.pos_history;
+        has_fossen = true;
+    catch
+        has_fossen = false;
+    end
+end
+
+% Đồ thị 3D so sánh 3 đường: Fossen lý tưởng, Tàu thật khép vòng, ES-EKF ước lượng
 subplot(2, 2, 1);
-plot3(pos_true_hist(:, 2), pos_true_hist(:, 1), pos_true_hist(:, 3), 'b-', 'LineWidth', 2);
+leg_handles = [];
+leg_labels  = {};
+
+if has_fossen
+    % 1. Đường Fossen Standalone thuần (màu xanh lá đậm nét đứt-chấm hoặc màu đen nét liền)
+    h_fossen = plot3(pos_fossen(:, 2), pos_fossen(:, 1), pos_fossen(:, 3), ...
+        'Color', [0, 0.5, 0], 'LineStyle', '--', 'LineWidth', 1.8);
+    hold on;
+    leg_handles(end+1) = h_fossen;
+    leg_labels{end+1}  = '1. Fossen Standalone (Ly tuong)';
+end
+
+% 2. Tàu chạy thực tế (có khép vòng điều khiển nhận phản hồi từ ES-EKF)
+h_true = plot3(pos_true_hist(:, 2), pos_true_hist(:, 1), pos_true_hist(:, 3), 'b-', 'LineWidth', 2.0);
 hold on;
-plot3(pos_est_hist(:, 2), pos_est_hist(:, 1), pos_est_hist(:, 3), 'm--', 'LineWidth', 1.5);
-plot3(wpt.pos.y, wpt.pos.x, wpt.pos.z, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
+leg_handles(end+1) = h_true;
+leg_labels{end+1}  = '2. Tau chay thuc te';
+
+% 3. Quỹ đạo do bộ lọc ES-EKF ước lượng trực tuyến
+h_est = plot3(pos_est_hist(:, 2), pos_est_hist(:, 1), pos_est_hist(:, 3), 'm--', 'LineWidth', 1.5);
+leg_handles(end+1) = h_est;
+leg_labels{end+1}  = '3. Uoc luong ES-EKF';
+
+% 4. Các mốc Waypoints mục tiêu
+h_wpt = plot3(wpt.pos.y, wpt.pos.x, wpt.pos.z, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
 plot3(wpt.pos.y, wpt.pos.x, wpt.pos.z, 'k:', 'LineWidth', 1);
+leg_handles(end+1) = h_wpt;
+leg_labels{end+1}  = 'Waypoints';
+
 grid on;
 set(gca, 'ZDir', 'reverse');
 xlabel('East (m)'); ylabel('North (m)'); zlabel('Down (m)');
-title('Quy dao 3D: REMUS 100 dan duong boi ES-EKF', 'FontWeight', 'bold');
-legend('Tau chay thuc te', 'Uoc luong ES-EKF', 'Waypoints', 'Location', 'best');
+title('Quy dao 3D: Fossen Standalone vs Tau that vs ES-EKF', 'FontWeight', 'bold');
+legend(leg_handles, leg_labels, 'Location', 'best');
 view(45, 25);
 
 % Đồ thị hội tụ góc Boresight DVL (Roll, Pitch, Yaw)
@@ -595,12 +720,16 @@ legend('Err North', 'Err East', 'Err Down', 'Tong sai so 3D', 'Location', 'best'
 
 if save_main
     img_path = fullfile(script_dir, 'fig_fossen_esekf_integrated.png');
+    fig_matlab_path = fullfile(script_dir, 'fig_fossen_esekf_integrated.fig');
 else
     img_path = fullfile(script_dir, sprintf('fig_fossen_esekf_integrated_%s.png', sensor_model));
+    fig_matlab_path = fullfile(script_dir, sprintf('fig_fossen_esekf_integrated_%s.fig', sensor_model));
 end
 saveas(fig, img_path);
-close(fig);
-fprintf('Đã xuất hình ảnh tích hợp vào: %s\n', img_path);
+savefig(fig, fig_matlab_path);
+% GIỮ NGUYÊN CỬA SỔ FIGURE ĐỂ NGƯỜI DÙNG XEM TRỰC TIẾP TRÊN MÀN HÌNH (KHÔNG DÙNG close(fig))
+drawnow;
+fprintf('Đã hiển thị figure trực tiếp trên màn hình và lưu file:\n  + Ảnh PNG: %s\n  + MATLAB Fig: %s\n', img_path, fig_matlab_path);
 
 %% 7. TỔNG KẾT THỐNG KÊ HIỆU CHUẨN VÀ ĐỊNH VỊ
 final_bs_deg = rad2deg(boresight_est_hist(end, :)');
@@ -622,6 +751,25 @@ fprintf('Scale Factor DVL: Uoc luong = %6.3f %%   | That = %6.3f %%   | Sai so =
 fprintf('Sai so vi tri 3D cuoi cung: %.2f m (Sau %.0fs hanh trinh va mat GNSS tu giay %.0f)\n', ...
     pos_err_norm(end), T_final, T_gnss_cut);
 fprintf('=========================================================================\n');
+
+if nargout > 0
+    res = struct();
+    res.t = t;
+    res.pos_true = pos_true_hist;
+    res.pos_est = pos_est_hist;
+    res.pos_err = pos_err;
+    res.pos_err_norm = pos_err_norm;
+    res.euler_true = euler_true_hist;
+    res.euler_est = euler_est_hist;
+    res.boresight_est = boresight_est_hist;
+    res.scale_est = scale_est_hist;
+    res.cov_pos = cov_pos_hist;
+    res.cov_euler = cov_euler_hist;
+    res.cov_bs = cov_bs_hist;
+    res.cov_scale = cov_scale_hist;
+    res.t_align = t_align;
+    varargout{1} = res;
+end
 end
 
 %% CÁC HÀM PHỤ TRỢ CỤC BỘ

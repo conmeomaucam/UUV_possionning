@@ -225,7 +225,7 @@ fprintf('Đã lưu dữ liệu mốc đối chứng vào: %s\n', save_path);
 
 %% 6. VẼ VÀ LƯU ĐỒ THỊ QUỸ ĐẠO FOSSEN STANDALONE
 fig = figure('Name', 'Fossen REMUS 100 Standalone Trajectory', ...
-    'Position', [100, 100, 1200, 800], 'Visible', 'off');
+    'Position', [100, 100, 1200, 800], 'Visible', 'on');
 
 % Đồ thị 3D không gian
 subplot(2, 2, [1, 3]);
@@ -266,9 +266,12 @@ ylabel('Do sau (m)', 'FontSize', 10);
 title('Dien bien do sau lan theo thoi gian', 'FontSize', 11, 'FontWeight', 'bold');
 
 img_path = fullfile(script_dir, 'fig_fossen_standalone.png');
+fig_matlab_path = fullfile(script_dir, 'fig_fossen_standalone.fig');
 saveas(fig, img_path);
-close(fig);
-fprintf('Đã xuất hình ảnh đồ thị vào: %s\n', img_path);
+savefig(fig, fig_matlab_path);
+% Giữ nguyên figure trên màn hình cho người dùng xem và thao tác trực tiếp
+drawnow;
+fprintf('Đã hiển thị figure trực tiếp trên màn hình và lưu file:\n  + Ảnh PNG: %s\n  + MATLAB Fig: %s\n', img_path, fig_matlab_path);
 
 %% 7. TỔNG KẾT THÔNG SỐ VẬN HÀNH
 max_cross_track = max(abs(alos_history(:, 1)));

@@ -1,6 +1,6 @@
 function [state, covariance, update_status, nis, diag_out] = esekf19_step( ...
     state, covariance, process_noise, gyro_meas, accel_meas, ...
-    gnss_meas, depth_meas, dvl_meas, measurement_flags, cfg)
+    gnss_meas, depth_meas, dvl_meas, measurement_flags, cfg, mag_meas)
 %ESEKF19_STEP Thực hiện một bước dự đoán quán tính INS (400 Hz) và cập nhật đo đạc Kalman (5 Hz)
 %   cho bộ lọc sai số ES-EKF 19 trạng thái (Error-State Extended Kalman Filter).
 %
@@ -19,7 +19,11 @@ function [state, covariance, update_status, nis, diag_out] = esekf19_step( ...
 %       gnss_meas         - Vector đo GNSS (7x1): [pos_NED(3); vel_NED(3); yaw(1)]
 %       depth_meas        - Giá trị đo độ sâu từ cảm biến áp suất thủy tĩnh (m)
 %       dvl_meas          - Vector đo vận tốc đáy từ DVL A125 [v_x; v_y; v_z] (m/s)
-%       measurement_flags - Cờ hợp lệ của các cảm biến (3x1): [co_GNSS; co_Depth; co_DVL]
+%       measurement_flags - Cờ hợp lệ của các cảm biến (3x1 hoặc 4x1):
+%                           [co_GNSS; co_Depth; co_DVL; co_MAG (tùy chọn)]
+%       mag_meas          - [Tùy chọn] Từ trường 3 trục đo trong hệ thân [m_x; m_y; m_z]
+%                           (đơn vị bất kỳ, chỉ dùng tỉ lệ giữa các trục để tính hướng).
+%                           Chỉ dùng khi measurement_flags(4) ~= 0.
 %       cfg               - Vector tham số hệ thống (19x1 hoặc 20x1):
 %                           (1) dt, (2) gravity, (3:5) w_ie_ned, (6) RN, (7) RM,
 %                           (8) tan_latitude, (9) height, (10:12) lever_arm,
@@ -27,6 +31,9 @@ function [state, covariance, update_status, nis, diag_out] = esekf19_step( ...
 %                           (15) gps_pos_sigma, (16) gps_vel_sigma, (17) gps_yaw_sigma,
 %                           (18) depth_sigma, (19) accel_bias_tau,
 %                           (20) [Tùy chọn E1] sigma_arw con quay (rad/sqrt(s))
+%                           (21) [Tùy chọn] cờ khóa hiệu chuẩn Boresight/Scale (1 = khóa)
+%                           (22) [Tùy chọn MAG] độ từ thiên tại vùng hoạt động (rad)
+%                           (23) [Tùy chọn MAG] độ lệch chuẩn hướng từ kế (rad)
 %
 %   Đầu ra:
 %       state         - Vector trạng thái danh định đã được cập nhật (20x1)
@@ -127,8 +134,10 @@ covariance = F*covariance*F' + process_noise;
 % =========================================================================
 % 4. TẦNG CẬP NHẬT ĐO ĐẠC KALMAN (5 Hz)
 % =========================================================================
-update_status = zeros(3, 1);
-nis = zeros(3, 1);
+% Số kênh báo cáo: 3 (GNSS, Depth, DVL) hoặc 4 nếu có thêm cờ từ kế
+n_channels = max(3, numel(measurement_flags));
+update_status = zeros(n_channels, 1);
+nis = zeros(n_channels, 1);
 
 % -------------------------------------------------------------------------
 % 4.1. CẬP NHẬT GNSS (VỊ TRÍ, VẬN TỐC; GÓC HƯỚNG CHỈ KHI CÓ 2 ĂNG-TEN)
@@ -198,6 +207,55 @@ if measurement_flags(2) ~= 0
         update_depth(covariance, H, residual, cfg(18)^2);
     update_status(2) = accepted;
     nis(2) = nis_value;
+
+    if accepted ~= 0
+        [position, velocity, quaternion, accel_bias, gyro_bias, scale, boresight, covariance] = ...
+            esekf19_inject_error(delta_state, covariance, position, velocity, quaternion, ...
+            accel_bias, gyro_bias, scale, boresight);
+    end
+end
+
+% -------------------------------------------------------------------------
+% 4.2b. CẬP NHẬT HƯỚNG TỪ KẾ (MAGNETOMETER HEADING) - DÙNG CẢ TRÊN MẶT NƯỚC VÀ KHI LẶN
+% -------------------------------------------------------------------------
+% Mô hình LÝ TƯỞNG: từ kế đã hiệu chuẩn hard/soft-iron hoàn hảo, chỉ còn nhiễu trắng.
+% Từ kế KHÔNG đo tư thế trực tiếp: nó đo vector từ trường trong hệ thân.
+% Bộ lọc dùng roll/pitch ƯỚC LƯỢNG của chính nó để bù nghiêng (tilt compensation),
+% đưa vector về mặt phẳng ngang rồi tính ra GÓC HƯỚNG -> 1 phép đo vô hướng cho yaw.
+% (Không dùng vector 3 trục để tránh sai số từ trường kéo lệch roll/pitch.)
+if numel(measurement_flags) >= 4 && measurement_flags(4) ~= 0 && nargin >= 11
+    Cbn = quat_to_cbn(quaternion);
+    roll_est  = atan2(Cbn(3, 2), Cbn(3, 3));
+    pitch_est = -asin(max(min(Cbn(3, 1), 1), -1));
+
+    % Bù nghiêng: m_h = Ry(pitch) * Rx(roll) * m_body  (= Rz(yaw)' * m_NED)
+    cr = cos(roll_est);  sr = sin(roll_est);
+    cp = cos(pitch_est); sp = sin(pitch_est);
+    Rx = [1, 0, 0; 0, cr, -sr; 0, sr, cr];
+    Ry = [cp, 0, sp; 0, 1, 0; -sp, 0, cp];
+    m_level = Ry * Rx * mag_meas(:);
+
+    % Với m_NED = [H*cos(D); H*sin(D); Z] thì m_level = [H*cos(D-yaw); H*sin(D-yaw); Z]
+    % => yaw = atan2(-m_level(2), m_level(1)) + D   (D: độ từ thiên, cfg(22))
+    declination = cfg(22);
+    yaw_mag = atan2(-m_level(2), m_level(1)) + declination;
+
+    % Phần dư góc hướng (cuộn tròn về [-pi, pi])
+    yaw_estimate = atan2(Cbn(2, 1), Cbn(1, 1));
+    yaw_residual = atan2(sin(yaw_mag - yaw_estimate), cos(yaw_mag - yaw_estimate));
+
+    % Ma trận quan sát: đạo hàm yaw theo sai số góc khung thân delta_theta
+    % (giống hệt hàng H_yaw của GNSS 2 ăng-ten ở mục 4.1)
+    cosp = max(cos(pitch_est), 1e-6);
+    H = zeros(1, 19);
+    H(1, 7:9) = [0, sin(roll_est)/cosp, cos(roll_est)/cosp];
+
+    % Cập nhật Kalman vô hướng + cổng NIS 1 bậc tự do (99%: 6.63)
+    % (dùng chung hàm cập nhật vô hướng với cảm biến độ sâu)
+    [delta_state, covariance, accepted, nis_value] = ...
+        update_depth(covariance, H, yaw_residual, cfg(23)^2);
+    update_status(4) = accepted;
+    nis(4) = nis_value;
 
     if accepted ~= 0
         [position, velocity, quaternion, accel_bias, gyro_bias, scale, boresight, covariance] = ...
