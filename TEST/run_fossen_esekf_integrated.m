@@ -625,9 +625,7 @@ if save_main
 end
 fprintf('Đã lưu dữ liệu tích hợp vào: %s\n', save_path);
 
-%% 6. VẼ ĐỒ THỊ KẾT QUẢ TÍCH HỢP VÀ HỘI TỤ HIỆU CHUẨN
-fig = figure('Name', 'Integrated Fossen REMUS 100 with ES-EKF Calibration', ...
-    'Position', [50, 50, 1300, 850], 'Visible', 'on');
+%% 6. VẼ ĐỒ THỊ KẾT QUẢ: MỖI HÌNH 1 TAB RIÊNG BIỆT (KHÔNG GHÉP SUBPLOT ĐỂ TRÁNH LỖI ẨN)
 
 % Đọc dữ liệu quỹ đạo chuẩn Fossen Standalone (lý tưởng) để vẽ đối chứng
 fossen_file = fullfile(script_dir, 'ket_qua_fossen_standalone.mat');
@@ -642,94 +640,180 @@ if exist(fossen_file, 'file')
     end
 end
 
-% Đồ thị 3D so sánh 3 đường: Fossen lý tưởng, Tàu thật khép vòng, ES-EKF ước lượng
-subplot(2, 2, 1);
+% -------------------------------------------------------------------------
+% TAB 1 (FIGURE 1): QUỸ ĐẠO 3D TOÀN MÀN HÌNH (TỰ DO ZOOM & XOAY 3D BẰNG CHUỘT)
+% -------------------------------------------------------------------------
+fig1 = figure('Name', 'Tab 1: Quy Dao 3D REMUS 100 (Fossen vs Tau That vs ES-EKF)', ...
+    'Color', 'w', 'Position', [30, 40, 1450, 880], 'WindowState', 'maximized', ...
+    'Toolbar', 'figure', 'MenuBar', 'figure', 'Visible', 'on');
+
+ax1 = axes('Position', [0.07, 0.08, 0.88, 0.85]);
+
 leg_handles = [];
 leg_labels  = {};
 
 if has_fossen
-    % 1. Đường Fossen Standalone thuần (màu xanh lá đậm nét đứt-chấm hoặc màu đen nét liền)
+    % 1. Đường Fossen Standalone thuần (lý tưởng)
     h_fossen = plot3(pos_fossen(:, 2), pos_fossen(:, 1), pos_fossen(:, 3), ...
-        'Color', [0, 0.5, 0], 'LineStyle', '--', 'LineWidth', 1.8);
+        'Color', [0, 0.55, 0], 'LineStyle', '--', 'LineWidth', 2.2);
     hold on;
     leg_handles(end+1) = h_fossen;
     leg_labels{end+1}  = '1. Fossen Standalone (Ly tuong)';
 end
 
 % 2. Tàu chạy thực tế (có khép vòng điều khiển nhận phản hồi từ ES-EKF)
-h_true = plot3(pos_true_hist(:, 2), pos_true_hist(:, 1), pos_true_hist(:, 3), 'b-', 'LineWidth', 2.0);
+h_true = plot3(pos_true_hist(:, 2), pos_true_hist(:, 1), pos_true_hist(:, 3), ...
+    'b-', 'LineWidth', 2.2);
 hold on;
 leg_handles(end+1) = h_true;
 leg_labels{end+1}  = '2. Tau chay thuc te';
 
 % 3. Quỹ đạo do bộ lọc ES-EKF ước lượng trực tuyến
-h_est = plot3(pos_est_hist(:, 2), pos_est_hist(:, 1), pos_est_hist(:, 3), 'm--', 'LineWidth', 1.5);
+h_est = plot3(pos_est_hist(:, 2), pos_est_hist(:, 1), pos_est_hist(:, 3), ...
+    'm-.', 'LineWidth', 1.8);
 leg_handles(end+1) = h_est;
 leg_labels{end+1}  = '3. Uoc luong ES-EKF';
 
 % 4. Các mốc Waypoints mục tiêu
+plot3(wpt.pos.y, wpt.pos.x, wpt.pos.z, 'k:', 'LineWidth', 1.2);
 h_wpt = plot3(wpt.pos.y, wpt.pos.x, wpt.pos.z, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
-plot3(wpt.pos.y, wpt.pos.x, wpt.pos.z, 'k:', 'LineWidth', 1);
 leg_handles(end+1) = h_wpt;
 leg_labels{end+1}  = 'Waypoints';
 
-grid on;
+% Đánh nhãn mốc xuất phát, lặn ngầm và đích
+plot3(pos_true_hist(1, 2), pos_true_hist(1, 1), pos_true_hist(1, 3), 'gp', ...
+    'MarkerSize', 12, 'MarkerFaceColor', 'g', 'MarkerEdgeColor', 'k');
+text(pos_true_hist(1, 2) + 30, pos_true_hist(1, 1) + 20, pos_true_hist(1, 3) - 5, ...
+    'XUAT PHAT (t=0s)', 'FontSize', 9, 'FontWeight', 'bold', 'Color', [0 0.5 0]);
+
+% Mốc cắt GNSS thực tế (thời điểm cuối cùng nhận GNSS trước khi anten chìm zn > 0.5m)
+idx_cut = find(~isnan(acc_hist(:, 1)) & acc_hist(:, 1) == 1, 1, 'last');
+if isempty(idx_cut)
+    idx_cut = find(t >= T_gnss_cut | pos_true_hist(:, 3) > 0.5, 1, 'first');
+end
+if ~isempty(idx_cut)
+    t_cut_act = t(idx_cut);
+    plot3(pos_true_hist(idx_cut, 2), pos_true_hist(idx_cut, 1), pos_true_hist(idx_cut, 3), 'yd', ...
+        'MarkerSize', 11, 'MarkerFaceColor', [1 0.6 0], 'MarkerEdgeColor', 'k');
+    text(pos_true_hist(idx_cut, 2) + 30, pos_true_hist(idx_cut, 1) - 40, pos_true_hist(idx_cut, 3) - 5, ...
+        sprintf('CAT GNSS (t = %.1fs, zn = %.2fm)', t_cut_act, pos_true_hist(idx_cut, 3)), ...
+        'FontSize', 9, 'FontWeight', 'bold', 'Color', [0.8 0.4 0]);
+end
+
+plot3(pos_true_hist(end, 2), pos_true_hist(end, 1), pos_true_hist(end, 3), 'rs', ...
+    'MarkerSize', 11, 'MarkerFaceColor', 'r', 'MarkerEdgeColor', 'k');
+text(pos_true_hist(end, 2) - 150, pos_true_hist(end, 1) + 25, pos_true_hist(end, 3) - 5, ...
+    sprintf('DICH (t=%.0fs)', t(end)), 'FontSize', 9, 'FontWeight', 'bold', 'Color', 'r');
+
+grid on; box on;
 set(gca, 'ZDir', 'reverse');
-xlabel('East (m)'); ylabel('North (m)'); zlabel('Down (m)');
-title('Quy dao 3D: Fossen Standalone vs Tau that vs ES-EKF', 'FontWeight', 'bold');
-legend(leg_handles, leg_labels, 'Location', 'best');
+xlabel('East (m)', 'FontSize', 11, 'FontWeight', 'bold');
+ylabel('North (m)', 'FontSize', 11, 'FontWeight', 'bold');
+zlabel('Down - Do sau (m)', 'FontSize', 11, 'FontWeight', 'bold');
+title({'Quy dao 3D: Fossen Standalone vs Tau that vs ES-EKF', ...
+       '(\bfClick & Keo chuot de XOAY 3D\rm | Cuon con lan chuot de ZOOM TO bat ky vi tri nao)'}, ...
+       'FontSize', 12, 'FontWeight', 'bold');
+legend(leg_handles, leg_labels, 'Location', 'best', 'FontSize', 10);
+daspect([1 1 0.25]);
 view(45, 25);
+rotate3d(fig1, 'on');
 
-% Đồ thị hội tụ góc Boresight DVL (Roll, Pitch, Yaw)
-subplot(2, 2, 2);
-plot(t, rad2deg(boresight_est_hist(:, 1)), 'r-', 'LineWidth', 1.8); hold on;
-plot(t, rad2deg(boresight_est_hist(:, 2)), 'g-', 'LineWidth', 1.8);
-plot(t, rad2deg(boresight_est_hist(:, 3)), 'b-', 'LineWidth', 1.8);
-yline(rad2deg(true_boresight(1)), 'r--', 'LineWidth', 1.5);
-yline(rad2deg(true_boresight(2)), 'g--', 'LineWidth', 1.5);
-yline(rad2deg(true_boresight(3)), 'b--', 'LineWidth', 1.5);
-grid on;
-xlabel('Thoi gian (s)'); ylabel('Goc Boresight (deg)');
-title('Hoi tu goc lech truc Boresight DVL (Roll, Pitch, Yaw)', 'FontWeight', 'bold');
-legend('Roll est', 'Pitch est', 'Yaw est', 'Roll true', 'Pitch true', 'Yaw true', 'Location', 'best');
+fig1_png = fullfile(script_dir, 'fig1_quy_dao_3d.png');
+fig1_fig = fullfile(script_dir, 'fig1_quy_dao_3d.fig');
+saveas(fig1, fig1_png);
+savefig(fig1, fig1_fig);
 
-% Đồ thị hội tụ hệ số tỉ lệ Scale Factor DVL
-subplot(2, 2, 3);
-plot(t, scale_est_hist * 100, 'b-', 'LineWidth', 2); hold on;
-plot(t, (scale_est_hist + 3*cov_scale_hist) * 100, 'k:', 'LineWidth', 1.2);
-plot(t, (scale_est_hist - 3*cov_scale_hist) * 100, 'k:', 'LineWidth', 1.2);
+% -------------------------------------------------------------------------
+% TAB 2 (FIGURE 2): HỘI TỤ GÓC BORESIGHT DVL (ROLL, PITCH, YAW)
+% -------------------------------------------------------------------------
+fig2 = figure('Name', 'Tab 2: Hoi Tu Goc Boresight DVL (Roll, Pitch, Yaw)', ...
+    'Color', 'w', 'Position', [60, 60, 1200, 750], 'Visible', 'on');
+ax2 = axes('Position', [0.08, 0.10, 0.88, 0.82]);
+plot(t, rad2deg(boresight_est_hist(:, 1)), 'r-', 'LineWidth', 2.0); hold on;
+plot(t, rad2deg(boresight_est_hist(:, 2)), 'g-', 'LineWidth', 2.0);
+plot(t, rad2deg(boresight_est_hist(:, 3)), 'b-', 'LineWidth', 2.0);
+yline(rad2deg(true_boresight(1)), 'r--', 'LineWidth', 1.6);
+yline(rad2deg(true_boresight(2)), 'g--', 'LineWidth', 1.6);
+yline(rad2deg(true_boresight(3)), 'b--', 'LineWidth', 1.6);
+xline(T_gnss_cut, 'm--', sprintf('Cat GNSS (%.0fs)', T_gnss_cut), 'LineWidth', 1.4);
+grid on; box on;
+xlabel('Thoi gian (s)', 'FontSize', 11, 'FontWeight', 'bold');
+ylabel('Goc Boresight (deg)', 'FontSize', 11, 'FontWeight', 'bold');
+title('Hoi tu goc lech truc Boresight DVL (Roll, Pitch, Yaw)', 'FontSize', 12, 'FontWeight', 'bold');
+legend('Roll est', 'Pitch est', 'Yaw est', 'Roll true (1.5 deg)', 'Pitch true (-2.0 deg)', 'Yaw true (3.0 deg)', ...
+       'Location', 'best', 'FontSize', 10);
+
+fig2_png = fullfile(script_dir, 'fig2_boresight.png');
+fig2_fig = fullfile(script_dir, 'fig2_boresight.fig');
+saveas(fig2, fig2_png);
+savefig(fig2, fig2_fig);
+
+% -------------------------------------------------------------------------
+% TAB 3 (FIGURE 3): HỘI TỤ HỆ SỐ TỈ LỆ SCALE FACTOR DVL
+% -------------------------------------------------------------------------
+fig3 = figure('Name', 'Tab 3: Hoi Tu He So Ti Le Scale Factor DVL', ...
+    'Color', 'w', 'Position', [90, 80, 1200, 750], 'Visible', 'on');
+ax3 = axes('Position', [0.08, 0.10, 0.88, 0.82]);
+plot(t, scale_est_hist * 100, 'b-', 'LineWidth', 2.2); hold on;
+plot(t, (scale_est_hist + 3*cov_scale_hist) * 100, 'k:', 'LineWidth', 1.3);
+plot(t, (scale_est_hist - 3*cov_scale_hist) * 100, 'k:', 'LineWidth', 1.3);
 yline(true_scale * 100, 'r--', 'LineWidth', 1.8);
-grid on;
-xlabel('Thoi gian (s)'); ylabel('Scale Factor (%)');
-title('Hoi tu he so ti le Scale Factor DVL (Cold Start)', 'FontWeight', 'bold');
-legend('Scale est', '+3\sigma', '-3\sigma', 'Scale true (+1.5%)', 'Location', 'best');
+xline(T_gnss_cut, 'm--', sprintf('Cat GNSS (%.0fs)', T_gnss_cut), 'LineWidth', 1.4);
+grid on; box on;
+xlabel('Thoi gian (s)', 'FontSize', 11, 'FontWeight', 'bold');
+ylabel('Scale Factor (%)', 'FontSize', 11, 'FontWeight', 'bold');
+title('Hoi tu he so ti le Scale Factor DVL (Cold Start)', 'FontSize', 12, 'FontWeight', 'bold');
+legend('Scale est', '+3\sigma', '-3\sigma', 'Scale true (+1.5%)', 'Location', 'best', 'FontSize', 10);
 
-% Đồ thị sai số định vị vị trí NED
-subplot(2, 2, 4);
+fig3_png = fullfile(script_dir, 'fig3_scale_factor.png');
+fig3_fig = fullfile(script_dir, 'fig3_scale_factor.fig');
+saveas(fig3, fig3_png);
+savefig(fig3, fig3_fig);
+
+% -------------------------------------------------------------------------
+% TAB 4 (FIGURE 4): SAI SỐ VỊ TRÍ VÀ VẬN TỐC THEO THỜI GIAN
+% -------------------------------------------------------------------------
+fig4 = figure('Name', 'Tab 4: Sai So Vi Tri Va Van Toc ES-EKF Theo Thoi Gian', ...
+    'Color', 'w', 'Position', [120, 100, 1250, 750], 'Visible', 'on');
+
+subplot(2, 1, 1);
 pos_err = pos_true_hist - pos_est_hist;
 pos_err_norm = sqrt(sum(pos_err.^2, 2));
-plot(t, pos_err(:, 1), 'r-', 'LineWidth', 1.3); hold on;
-plot(t, pos_err(:, 2), 'g-', 'LineWidth', 1.3);
-plot(t, pos_err(:, 3), 'b-', 'LineWidth', 1.3);
-plot(t, pos_err_norm, 'k-', 'LineWidth', 2);
-xline(T_gnss_cut, 'm--', sprintf('Cut GNSS (%.0fs)', T_gnss_cut), 'LineWidth', 1.5);
-grid on;
+plot(t, pos_err(:, 1), 'r-', 'LineWidth', 1.5); hold on;
+plot(t, pos_err(:, 2), 'g-', 'LineWidth', 1.5);
+plot(t, pos_err(:, 3), 'b-', 'LineWidth', 1.5);
+plot(t, pos_err_norm, 'k-', 'LineWidth', 2.2);
+xline(T_gnss_cut, 'm--', sprintf('Cat GNSS (%.0fs)', T_gnss_cut), 'LineWidth', 1.4);
+grid on; box on;
 xlabel('Thoi gian (s)'); ylabel('Sai so vi tri (m)');
-title('Sai so vi tri UUV giua Ground Truth va ES-EKF', 'FontWeight', 'bold');
+title('Sai so vi tri NED giua Ground Truth va ES-EKF', 'FontWeight', 'bold');
 legend('Err North', 'Err East', 'Err Down', 'Tong sai so 3D', 'Location', 'best');
 
-if save_main
-    img_path = fullfile(script_dir, 'fig_fossen_esekf_integrated.png');
-    fig_matlab_path = fullfile(script_dir, 'fig_fossen_esekf_integrated.fig');
-else
-    img_path = fullfile(script_dir, sprintf('fig_fossen_esekf_integrated_%s.png', sensor_model));
-    fig_matlab_path = fullfile(script_dir, sprintf('fig_fossen_esekf_integrated_%s.fig', sensor_model));
-end
-saveas(fig, img_path);
-savefig(fig, fig_matlab_path);
-% GIỮ NGUYÊN CỬA SỔ FIGURE ĐỂ NGƯỜI DÙNG XEM TRỰC TIẾP TRÊN MÀN HÌNH (KHÔNG DÙNG close(fig))
+subplot(2, 1, 2);
+vel_err = vel_true_hist - vel_est_hist;
+vel_err_norm = sqrt(sum(vel_err.^2, 2));
+plot(t, vel_err(:, 1), 'r-', 'LineWidth', 1.3); hold on;
+plot(t, vel_err(:, 2), 'g-', 'LineWidth', 1.3);
+plot(t, vel_err(:, 3), 'b-', 'LineWidth', 1.3);
+plot(t, vel_err_norm, 'k-', 'LineWidth', 2.0);
+xline(T_gnss_cut, 'm--', sprintf('Cat GNSS (%.0fs)', T_gnss_cut), 'LineWidth', 1.4);
+grid on; box on;
+xlabel('Thoi gian (s)'); ylabel('Sai so van toc (m/s)');
+title('Sai so van toc NED giua Ground Truth va ES-EKF', 'FontWeight', 'bold');
+legend('Err v_N', 'Err v_E', 'Err v_D', 'Tong |v_{err}|', 'Location', 'best');
+
+fig4_png = fullfile(script_dir, 'fig4_sai_so_dinh_vi.png');
+fig4_fig = fullfile(script_dir, 'fig4_sai_so_dinh_vi.fig');
+saveas(fig4, fig4_png);
+savefig(fig4, fig4_fig);
+
+% GIỮ TẤT CẢ 4 TAB/FIGURE TRÊN MÀN HÌNH ĐỂ NGƯỜI DÙNG XEM TRỰC TIẾP
 drawnow;
-fprintf('Đã hiển thị figure trực tiếp trên màn hình và lưu file:\n  + Ảnh PNG: %s\n  + MATLAB Fig: %s\n', img_path, fig_matlab_path);
+fprintf('Đã xuất thành công 4 TAB riêng biệt (mỗi hình 1 tab, không ghép subplot):\n');
+fprintf('  - Tab 1 (Quỹ đạo 3D toàn màn hình, bật sẵn rotate3d on): %s\n', fig1_fig);
+fprintf('  - Tab 2 (Hội tụ Boresight Roll/Pitch/Yaw): %s\n', fig2_fig);
+fprintf('  - Tab 3 (Hội tụ Scale Factor DVL): %s\n', fig3_fig);
+fprintf('  - Tab 4 (Sai số vị trí và vận tốc theo thời gian): %s\n', fig4_fig);
 
 %% 7. TỔNG KẾT THỐNG KÊ HIỆU CHUẨN VÀ ĐỊNH VỊ
 final_bs_deg = rad2deg(boresight_est_hist(end, :)');

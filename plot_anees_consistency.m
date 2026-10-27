@@ -41,7 +41,7 @@ T_max = max(t_eval);
 
 % 2. Xác định thời điểm cắt GNSS
 if T_max > 100
-    T_gnss_cut = 480.0; % Kịch bản thực tế REMUS 100 (480s mặt nước, sau đó lặn ngầm)
+    T_gnss_cut = 480.0; % Kịch bản thực tế REMUS 100 (480s mặt nước, sau đó lặn ngầm) cắt gnss này sai rồi 
 else
     T_gnss_cut = 15.0;  % Kịch bản bench 30s
 end

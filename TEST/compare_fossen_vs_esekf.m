@@ -53,8 +53,8 @@ for k = 1:N_steps
     cp = cos(theta_f); sp = sin(theta_f);
     cy = cos(psi_f); sy = sin(psi_f);
     Cbn_f = [cp*cy, sr*sp*cy - cr*sy, cr*sp*cy + sr*sy; ...
-             cp*sy, sr*sp*sy + cr*cy, cr*sp*sy - sr*cy; ...
-             -sp,   sr*cp,            cr*cp];
+        cp*sy, sr*sp*sy + cr*cy, cr*sp*sy - sr*cy; ...
+        -sp,   sr*cp,            cr*cp];
     v_ned_fossen(k, :) = (Cbn_f * f_data.vel_body_history(k, :)')';
 end
 
@@ -81,66 +81,76 @@ scale_true_pct = e_data.true_scale * 100;
 cov_bs_deg = rad2deg(e_data.cov_bs_hist);
 cov_scale_pct = e_data.cov_scale_hist * 100;
 
-%% 2. BIỂU ĐỒ 1: QUỸ ĐẠO 3 ĐƯỜNG RIÊNG BIỆT (3D, MẶT BẰNG 2D, TRẮC DỌC VÀ ĐỘ SÂU THEO THỜI GIAN)
-fig1 = figure('Name', 'So Sanh 3 Duong Quy Dao: Fossen vs Tau That vs ES-EKF', ...
-    'Position', [40, 40, 1400, 900], 'Visible', 'on');
+%% 2. BIỂU ĐỒ 1: QUỸ ĐẠO 3D TOÀN MÀN HÌNH (TỰ DO ZOOM & XOAY 3D BẰNG CHUỘT, KHÔNG SUBPLOT)
+fig1 = figure('Name', 'Tab 1: Quy Dao 3D (Fossen vs Tau That vs ES-EKF)', ...
+    'Color', 'w', 'Position', [30, 40, 1450, 880], 'WindowState', 'maximized', ...
+    'Toolbar', 'figure', 'MenuBar', 'figure', 'Visible', 'on');
 
-% Subplot 1: Không gian 3D
-subplot(2, 2, 1);
-plot3(pos_fossen(:, 2), pos_fossen(:, 1), pos_fossen(:, 3), 'b-', 'LineWidth', 2.0); hold on;
-plot3(pos_true_ekf(:, 2), pos_true_ekf(:, 1), pos_true_ekf(:, 3), 'r-', 'LineWidth', 2.0);
-plot3(pos_est_ekf(:, 2), pos_est_ekf(:, 1), pos_est_ekf(:, 3), 'm--', 'LineWidth', 1.5);
-plot3(wpt.pos.y, wpt.pos.x, wpt.pos.z, 'ko', 'MarkerSize', 8, 'MarkerFaceColor', 'y');
-plot3(wpt.pos.y, wpt.pos.x, wpt.pos.z, 'k:', 'LineWidth', 1);
-grid on; set(gca, 'ZDir', 'reverse');
-xlabel('East (m)'); ylabel('North (m)'); zlabel('Down - Do sau (m)');
-title('1. Quy dao 3D (3 duong rieng biet)', 'FontWeight', 'bold');
+ax1 = axes('Position', [0.07, 0.08, 0.88, 0.85]);
+
+% 1. Đường Fossen Standalone thuần (lý tưởng)
+plot3(pos_fossen(:, 2), pos_fossen(:, 1), pos_fossen(:, 3), ...
+    'Color', [0, 0.55, 0], 'LineStyle', '--', 'LineWidth', 2.2); hold on;
+
+% 2. Tàu chạy thực tế (có khép vòng điều khiển nhận phản hồi từ ES-EKF)
+plot3(pos_true_ekf(:, 2), pos_true_ekf(:, 1), pos_true_ekf(:, 3), ...
+    'b-', 'LineWidth', 2.2);
+
+% 3. Quỹ đạo do bộ lọc ES-EKF ước lượng trực tuyến
+plot3(pos_est_ekf(:, 2), pos_est_ekf(:, 1), pos_est_ekf(:, 3), ...
+    'm-.', 'LineWidth', 1.8);
+
+% 4. Các mốc Waypoints mục tiêu
+plot3(wpt.pos.y, wpt.pos.x, wpt.pos.z, 'k:', 'LineWidth', 1.2);
+plot3(wpt.pos.y, wpt.pos.x, wpt.pos.z, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
+
+% Đánh nhãn mốc xuất phát, lặn ngầm và đích
+plot3(pos_true_ekf(1, 2), pos_true_ekf(1, 1), pos_true_ekf(1, 3), 'gp', ...
+    'MarkerSize', 12, 'MarkerFaceColor', 'g', 'MarkerEdgeColor', 'k');
+text(pos_true_ekf(1, 2) + 30, pos_true_ekf(1, 1) + 20, pos_true_ekf(1, 3) - 5, ...
+    'XUAT PHAT (t=0s)', 'FontSize', 9, 'FontWeight', 'bold', 'Color', [0 0.5 0]);
+
+% Mốc cắt GNSS thực tế (thời điểm cuối cùng nhận GNSS trước khi anten chìm zn > 0.5m)
+if isfield(e_data, 'acc_hist') && any(~isnan(e_data.acc_hist(:, 1)) & e_data.acc_hist(:, 1) == 1)
+    idx_cut = find(~isnan(e_data.acc_hist(:, 1)) & e_data.acc_hist(:, 1) == 1, 1, 'last');
+else
+    idx_cut = find(t >= T_gnss_cut | pos_true_ekf(:, 3) > 0.5, 1, 'first');
+end
+if ~isempty(idx_cut)
+    t_cut_act = t(idx_cut);
+    plot3(pos_true_ekf(idx_cut, 2), pos_true_ekf(idx_cut, 1), pos_true_ekf(idx_cut, 3), 'yd', ...
+        'MarkerSize', 11, 'MarkerFaceColor', [1 0.6 0], 'MarkerEdgeColor', 'k');
+    text(pos_true_ekf(idx_cut, 2) + 30, pos_true_ekf(idx_cut, 1) - 40, pos_true_ekf(idx_cut, 3) - 5, ...
+        sprintf('CAT GNSS (t = %.1fs, zn = %.2fm)', t_cut_act, pos_true_ekf(idx_cut, 3)), ...
+        'FontSize', 9, 'FontWeight', 'bold', 'Color', [0.8 0.4 0]);
+end
+
+plot3(pos_true_ekf(end, 2), pos_true_ekf(end, 1), pos_true_ekf(end, 3), 'rs', ...
+    'MarkerSize', 11, 'MarkerFaceColor', 'r', 'MarkerEdgeColor', 'k');
+text(pos_true_ekf(end, 2) - 150, pos_true_ekf(end, 1) + 25, pos_true_ekf(end, 3) - 5, ...
+    sprintf('DICH (t=%.0fs)', t(end)), 'FontSize', 9, 'FontWeight', 'bold', 'Color', 'r');
+
+grid on; box on;
+set(gca, 'ZDir', 'reverse');
+xlabel('East (m)', 'FontSize', 11, 'FontWeight', 'bold');
+ylabel('North (m)', 'FontSize', 11, 'FontWeight', 'bold');
+zlabel('Down - Do sau (m)', 'FontSize', 11, 'FontWeight', 'bold');
+title({'1. Toan Canh Quy Dao 3D: Fossen Standalone vs Tau That vs ES-EKF', ...
+       '(\bfClick & Keo chuot de XOAY 3D\rm | Cuon con lan chuot de ZOOM TO bat ky vi tri nao)'}, ...
+       'FontSize', 12, 'FontWeight', 'bold');
 legend('1. Fossen Standalone (Ly tuong)', ...
        '2. Tau that (Tich hop ES-EKF)', ...
        '3. ES-EKF uoc luong', ...
-       'Waypoints', 'Location', 'best');
-view(40, 25);
-
-% Subplot 2: Mặt bằng 2D (North - East)
-subplot(2, 2, 2);
-plot(pos_fossen(:, 2), pos_fossen(:, 1), 'b-', 'LineWidth', 2.0); hold on;
-plot(pos_true_ekf(:, 2), pos_true_ekf(:, 1), 'r-', 'LineWidth', 2.0);
-plot(pos_est_ekf(:, 2), pos_est_ekf(:, 1), 'm--', 'LineWidth', 1.5);
-plot(wpt.pos.y, wpt.pos.x, 'ko', 'MarkerSize', 8, 'MarkerFaceColor', 'y');
-plot(wpt.pos.y, wpt.pos.x, 'k:', 'LineWidth', 1);
-grid on; axis equal;
-xlabel('East (m)'); ylabel('North (m)');
-title('2. Mat bang North - East (Nhin tu tren xuong)', 'FontWeight', 'bold');
-legend('1. Fossen Standalone', '2. Tau that', '3. ES-EKF uoc luong', 'Waypoints', 'Location', 'best');
-
-% Subplot 3: Trắc dọc độ sâu theo East
-subplot(2, 2, 3);
-plot(pos_fossen(:, 2), pos_fossen(:, 3), 'b-', 'LineWidth', 2.0); hold on;
-plot(pos_true_ekf(:, 2), pos_true_ekf(:, 3), 'r-', 'LineWidth', 2.0);
-plot(pos_est_ekf(:, 2), pos_est_ekf(:, 3), 'm--', 'LineWidth', 1.5);
-plot(wpt.pos.y, wpt.pos.z, 'ko', 'MarkerSize', 8, 'MarkerFaceColor', 'y');
-grid on; set(gca, 'YDir', 'reverse');
-xlabel('East (m)'); ylabel('Down - Do sau (m)');
-title('3. Trac doc do sau theo quang duong East', 'FontWeight', 'bold');
-legend('1. Fossen Standalone', '2. Tau that', '3. ES-EKF uoc luong', 'Waypoints', 'Location', 'best');
-
-% Subplot 4: Diễn biến độ sâu theo thời gian (Depth vs Time)
-subplot(2, 2, 4);
-plot(t, pos_fossen(:, 3), 'b-', 'LineWidth', 2.0); hold on;
-plot(t, pos_true_ekf(:, 3), 'r-', 'LineWidth', 2.0);
-plot(t, pos_est_ekf(:, 3), 'm--', 'LineWidth', 1.5);
-xline(T_gnss_cut, 'k--', sprintf('Cat GNSS (%.0fs)', T_gnss_cut), 'LineWidth', 1.3);
-grid on; set(gca, 'YDir', 'reverse');
-xlabel('Thoi gian (s)'); ylabel('Do sau (m)');
-title('4. Dien bien do sau Down theo thoi gian', 'FontWeight', 'bold');
-legend('1. Fossen Standalone', '2. Tau that', '3. ES-EKF uoc luong', 'Cat GNSS', 'Location', 'best');
+       'Duong Waypoints', 'Waypoints', 'Location', 'best', 'FontSize', 10);
+daspect([1 1 0.25]);
+view(45, 25);
+rotate3d(fig1, 'on');
 
 fig1_path = fullfile(script_dir, 'fig_so_sanh_quy_dao.png');
 fig1_fig_path = fullfile(script_dir, 'fig_so_sanh_quy_dao.fig');
 saveas(fig1, fig1_path);
 savefig(fig1, fig1_fig_path);
-% Giữ nguyên figure 1 trên màn hình cho người dùng xem và thao tác trực tiếp
-fprintf('Đã hiển thị Figure 1 trên màn hình và lưu file:\n  + PNG: %s\n  + FIG: %s\n', fig1_path, fig1_fig_path);
+fprintf('Đã hiển thị Figure 1 (toàn màn hình, không subplot) và lưu file:\n  + PNG: %s\n  + FIG: %s\n', fig1_path, fig1_fig_path);
 
 %% 3. BIỂU ĐỒ 2: SAI SỐ THEO TỪNG PHƯƠNG (NORTH, EAST) VÀ ĐỘ SÂU (DOWN)
 fig2 = figure('Name', 'Sai So Tung Phuong Va Do Sau', ...
