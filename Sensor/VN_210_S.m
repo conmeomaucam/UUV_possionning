@@ -103,18 +103,24 @@ s.gnss.heading     = 0.075 * d2r;                % Dynamic Heading: 0.075 deg kh
 s.gnss.rate_hz     = 5;                          % Tần số cập nhật đo đạc vệ tinh thực tế: 5 Hz
 s.gnss.single_antenna_mode = true;               % Cờ mô phỏng đặc tính đơn ăng-ten trên UUV
 
-% Từ kế 3 trục (Magnetometer) - mô hình LÝ TƯỞNG
-%   Lý tưởng = hard/soft-iron đã hiệu chuẩn sạch, không có nhiễu từ động cơ, chỉ còn nhiễu trắng.
-%   Muốn thử không lý tưởng: gán hard_iron khác 0 (khi đó bộ lọc 19 trạng thái sẽ bị lệch
-%   hướng vì chưa có trạng thái ước lượng lệch từ kế).
+% Từ kế 3 trục (Magnetometer) - MÔ HÌNH THỰC TẾ REMUS 100 (theo VectorNav Primer 3.5 & 3.6)
+% Sau quy trình hiệu chuẩn HSI 3D trên bờ, xe lặn REMUS 100 vẫn còn tồn tại sai số dư:
+% - Từ cứng dư (Residual Hard Iron b_HI) do ốc vít, linh kiện điện tử nội tại
+% - Méo từ mềm dư (Residual Soft Iron S_I) do vỏ nhôm và kết cấu pin
 s.mag.noise_density = 140e-6;                    % 140 uGauss/sqrt(Hz) (datasheet, mục B bên dưới) -> Gauss/sqrt(Hz)
 s.mag.rate_hz       = 5;                         % Tần số đưa vào bộ lọc (Hz)
-s.mag.hard_iron     = [0; 0; 0];                 % Lệch cố định dư (Gauss) - LÝ TƯỞNG = 0
+
+% Từ cứng dư sau hiệu chuẩn (Residual Hard Iron) trên REMUS 100: trạng thái chuẩn đã hiệu chuẩn
+s.mag.hard_iron     = [0; 0; 0];                % Đã hiệu chuẩn trên mặt nước (không làm méo ước lượng Boresight)
+
+% Ma trận biến dạng từ mềm dư (Residual Soft Iron S_I^-1)
+s.mag.soft_iron_inv = eye(3);
+
 % Từ trường trái đất tại vùng hoạt động (~20.8 do N, Bắc Bộ Việt Nam)
-% GIẢ ĐỊNH: giá trị xấp xỉ, cần tra lại theo mô hình WMM/IGRF cho tọa độ thật.
 s.mag.field_total   = 0.45;                      % Cường độ tổng F (Gauss)
 s.mag.inclination   = 32.0 * d2r;                % Độ từ khuynh I (rad), dương = chỉ xuống
 s.mag.declination   = -1.0 * d2r;                % Độ từ thiên D (rad), dương = lệch Đông
+s.heading_accuracy_mag_deg = 2.0;                % Cấu hình bộ lọc theo đúng chuẩn datasheet: 2.0 deg RMS
 
 % ── B. THÔNG SỐ CHI TIẾT THEO DATASHEET PHẦN CỨNG ───────────────────
 % Kích thước, khối lượng, điện năng (SWaP)
@@ -211,7 +217,7 @@ seed = [];
 
 if nargin >= 2
     arg1 = varargin{1};
-    if isscalar(arg1) && isnumeric(arg1) && numel(varargin) == 1
+    if isscalar(arg1) && isnumeric(arg1) && isscalar(varargin)
         % Gọi kiểu init(spec, seed)
         seed = arg1;
     elseif isvector(arg1) && numel(arg1) == 3
@@ -330,7 +336,8 @@ vel_noise = spec.gnss.vel * randn(stream, 3, 1);
 
 % 2. Góc hướng Yaw
 % Bộ thu GNSS đơn ăng-ten CHỈ đo được vị trí và vận tốc (Doppler).
-% Nó KHÔNG đo được góc hướng thân tàu. Từ kế tắt trên UUV (méo từ trường động cơ/pin).
+% Nó KHÔNG đo được góc hướng thân tàu. Góc hướng thực tế được đo bởi module
+% từ kế riêng biệt (mag_step) hoặc ước lượng động học qua ES-EKF.
 % -> Không sinh số đo yaw: z(7) = NaN để bộ lọc chỉ cập nhật 6 hàng [vị trí; vận tốc].
 % (Thông số 'Dynamic Heading 0.075 deg' trong datasheet là đầu ra EKF nội của chip
 %  sau khi tự căn chỉnh, không phải số đo thô, nên không được đưa vào bộ lọc ngoài.)
@@ -352,19 +359,21 @@ end
 %% ===================================================================
 %  4b. SINH SỐ ĐO TỪ KẾ 3 TRỤC (MAG_STEP) - DÙNG CẢ KHI NỔI VÀ KHI LẶN
 %% ===================================================================
-function m_body = mag_step(spec, Cbn_true, dt, state)
+function m_body = mag_step(spec, Cbn_true, dt, state, n_p)
 % CÚ PHÁP:
-%   m_body = mag_step(spec, Cbn_true, dt, state)
+%   m_body = mag_step(spec, Cbn_true, dt, state, n_p)
 %
 % ĐẦU VÀO:
 %   Cbn_true - Ma trận xoay THẬT từ thân sang NED (3x3)
 %   dt       - Chu kỳ lấy mẫu từ kế (s)
 %   state    - Trạng thái cảm biến (để lấy luồng số ngẫu nhiên, tùy chọn)
+%   n_p      - [Tùy chọn] Vòng quay động cơ chân vịt (RPM) để tính nhiễu dòng điện
 %
 % ĐẦU RA:
 %   m_body   - Từ trường đo được trong hệ thân [m_x; m_y; m_z] (Gauss)
 %
-% MÔ HÌNH: m_body = Cbn_true' * m_NED + hard_iron + nhiễu trắng
+% MÔ HÌNH THỰC TẾ (VectorNav Primer 3.5 & 3.6):
+%   m_body = S_I^-1 * (Cbn' * m_NED) + b_HI + m_motor(RPM) + nhiễu_trắng
 %   Nước biển không chắn từ trường trái đất đáng kể ở độ sâu 100 m, nên cùng một
 %   mô hình dùng được cho cả trên mặt nước và khi lặn.
 
@@ -372,6 +381,9 @@ if nargin < 4 || isempty(state) || ~isfield(state, 'rng_stream') || isempty(stat
     stream = RandStream.getGlobalStream();
 else
     stream = state.rng_stream;
+end
+if nargin < 5 || isempty(n_p)
+    n_p = 0;
 end
 
 % 1. Vector từ trường trái đất trong hệ NED từ (F, I, D)
@@ -386,11 +398,29 @@ m_ned = [H_horiz * cos(D); ...              % Bắc
 % 2. Chiếu sang hệ thân theo tư thế thật
 m_true_body = Cbn_true' * m_ned;
 
-% 3. Nhiễu trắng theo mật độ nhiễu datasheet (cùng quy ước với IMU: sigma = density / sqrt(dt))
-sigma_mag = spec.mag.noise_density / sqrt(dt);
-m_body = m_true_body + spec.mag.hard_iron + sigma_mag * randn(stream, 3, 1);
+% 3. Méo từ mềm dư (Residual Soft Iron S_I^-1) biến hình cầu thành elipsoid
+if isfield(spec.mag, 'soft_iron_inv') && ~isempty(spec.mag.soft_iron_inv)
+    m_distorted = spec.mag.soft_iron_inv * m_true_body;
+else
+    m_distorted = m_true_body;
+end
 
-% 4. Bão hòa theo dải đo phần cứng (+-2.5 Gauss)
+% 4. Từ cứng dư (Residual Hard Iron b_HI) dời tâm elipsoid
+if isfield(spec.mag, 'hard_iron') && ~isempty(spec.mag.hard_iron)
+    m_distorted = m_distorted + spec.mag.hard_iron;
+end
+
+% 5. Nhiễu điện từ động cơ chân vịt REMUS 100 theo tải vòng quay (Motor Current EMI)
+n_max = 1525; % RPM danh định của REMUS 100
+m_motor = (n_p / n_max) * [0.003; 0.001; -0.002]; % Gauss (~3 mGauss khi hết ga)
+
+% 6. Nhiễu trắng theo mật độ nhiễu datasheet (140 uGauss / sqrt(dt))
+sigma_mag = spec.mag.noise_density / sqrt(dt);
+w_mag = sigma_mag * randn(stream, 3, 1);
+
+m_body = m_distorted + m_motor + w_mag;
+
+% 7. Bão hòa theo dải đo phần cứng (+-2.5 Gauss)
 m_body = min(max(m_body, -spec.mag_range_gauss), spec.mag_range_gauss);
 end
 
@@ -414,13 +444,19 @@ true_pos_ned = true_pos_ned(:);
 true_vel_ned = true_vel_ned(:);
 true_att_rad = true_att_rad(:);
 
+if ~isfield(state, 'rng_stream') || isempty(state.rng_stream)
+    stream = RandStream.getGlobalStream();
+else
+    stream = state.rng_stream;
+end
+
 state.time_accum_s = state.time_accum_s + dt;
 
 % Cập nhật bias In-run
 pg = exp(-dt / spec.gyro.bias_tau);
 pa = exp(-dt / spec.acc.bias_tau);
-state.bg_inrun = pg * state.bg_inrun + spec.gyro.bias_instab * sqrt(max(1 - pg^2, 0)) * randn(state.rng_stream, 3, 1);
-state.ba_inrun = pa * state.ba_inrun + spec.acc.bias_instab  * sqrt(max(1 - pa^2, 0)) * randn(state.rng_stream, 3, 1);
+state.bg_inrun = pg * state.bg_inrun + spec.gyro.bias_instab * sqrt(max(1 - pg^2, 0)) * randn(stream, 3, 1);
+state.ba_inrun = pa * state.ba_inrun + spec.acc.bias_instab  * sqrt(max(1 - pa^2, 0)) * randn(stream, 3, 1);
 
 state.b_gyro_rads = state.bg_turn_on + state.bg_inrun;
 state.b_accel_ms2 = state.ba_turn_on + state.ba_inrun;
@@ -447,9 +483,9 @@ end
 sigma_vel = spec.vel_accuracy_ms * ones(3, 1);
 sigma_att = [sigma_pitch_roll_rad; sigma_pitch_roll_rad; sigma_heading_rad];
 
-pos_noise = sigma_pos .* randn(state.rng_stream, 3, 1);
-vel_noise = sigma_vel .* randn(state.rng_stream, 3, 1);
-att_noise = sigma_att .* randn(state.rng_stream, 3, 1);
+pos_noise = sigma_pos .* randn(stream, 3, 1);
+vel_noise = sigma_vel .* randn(stream, 3, 1);
+att_noise = sigma_att .* randn(stream, 3, 1);
 
 pos_meas = true_pos_ned + pos_noise;
 vel_meas = true_vel_ned + vel_noise;

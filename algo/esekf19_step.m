@@ -331,7 +331,14 @@ end
 
 function [delta_state, covariance, accepted, nis] = update_gnss(covariance, H, residual, R)
 %UPDATE_GNSS Cập nhật Kalman cho phép đo GNSS với cổng lọc NIS (6 hoặc 7 bậc tự do).
+delta_state = zeros(19, 1);
 S = H*covariance*H' + R;
+if ~all(isfinite(S(:))) || ~all(isfinite(residual))
+    accepted = 0;
+    nis = NaN;
+    return;
+end
+
 nis = residual'*(S\residual);
 
 % Ngưỡng Chi-square mức tin cậy 99% theo số bậc tự do:
@@ -343,7 +350,26 @@ else
     nis_gate = 18.48;
 end
 accepted = double(isfinite(nis) && nis <= nis_gate);
-delta_state = zeros(19, 1);
+
+% Tái hòa nhập GNSS sau khi lặn ngầm lâu (GNSS Re-acquisition):
+% Khi tàu lặn ngầm hàng nghìn giây, sai số trôi dạt định vị quán tính (dead reckoning)
+% có thể tích lũy từ vài mét đến hàng chục mét. Cổng Chi-square chuẩn (NIS <= 18.48)
+% sẽ coi độ lệch này là ngoại lai (outlier) và từ chối 100% số đo GNSS khi ngoi lên.
+% Do đó, nếu số đo GNSS là tín hiệu hợp lệ vật lý (độ lệch vị trí < 1000m, độ lệch vận tốc < 5 m/s),
+% ta chủ động nâng hiệp phương sai vị trí P(1:3, 1:3) tương ứng với độ lệch thực tế,
+% giúp bộ lọc thu nhận lại GNSS, kéo vị trí ước lượng về đúng tọa độ thật và thu hẹp covariance về chuẩn RTK.
+if accepted == 0 && isfinite(nis)
+    pos_res_norm = norm(residual(1:3));
+    vel_res_norm = norm(residual(4:6));
+    if pos_res_norm < 1000 && vel_res_norm < 5.0
+        scale_p = max(1.0, (pos_res_norm / 2.0)^2);
+        covariance(1:3, 1:3) = covariance(1:3, 1:3) + scale_p * eye(3);
+        S = H*covariance*H' + R;
+        nis = residual'*(S\residual);
+        accepted = 1;
+    end
+end
+
 if accepted == 0
     return;
 end
@@ -361,12 +387,18 @@ end
 
 function [delta_state, covariance, accepted, nis] = update_depth(covariance, H, residual, variance)
 %UPDATE_DEPTH Cập nhật Kalman cho cảm biến áp suất độ sâu (1 bậc tự do).
+delta_state = zeros(19, 1);
 S = H*covariance*H' + variance;
+if ~isfinite(S) || ~isfinite(residual) || S <= 0
+    accepted = 0;
+    nis = NaN;
+    return;
+end
+
 nis = residual*(S\residual);
 
 % Ngưỡng phân phối Chi-square 1 bậc tự do ở mức độ tin cậy 99% là 6.63
 accepted = double(isfinite(nis) && nis <= 6.63);
-delta_state = zeros(19, 1);
 if accepted == 0
     return;
 end
@@ -382,12 +414,18 @@ end
 
 function [delta_state, covariance, accepted, nis] = update_dvl(covariance, H, residual, R)
 %UPDATE_DVL Cập nhật Kalman cho vận tốc đáy DVL A125 (3 bậc tự do).
+delta_state = zeros(19, 1);
 S = H*covariance*H' + R;
+if ~all(isfinite(S(:))) || ~all(isfinite(residual))
+    accepted = 0;
+    nis = NaN;
+    return;
+end
+
 nis = residual'*(S\residual);
 
 % Ngưỡng phân phối Chi-square 3 bậc tự do ở mức độ tin cậy 99% là 11.34
 accepted = double(isfinite(nis) && nis <= 11.34);
-delta_state = zeros(19, 1);
 if accepted == 0
     return;
 end

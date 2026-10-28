@@ -35,13 +35,16 @@ e_data = load(integrated_mat);
 t = e_data.t;
 wpt = e_data.wpt;
 T_gnss_cut = e_data.T_gnss_cut;
-N_steps = length(t);
 
 %% 1. TRÍCH XUẤT VÀ TÍNH TOÁN DỮ LIỆU SO SÁNH 3 ĐƯỜNG
+% Đồng bộ số bước thời gian giữa 2 tập dữ liệu
+N_steps = min([length(t), size(f_data.pos_history, 1), size(e_data.pos_true_hist, 1)]);
+t = t(1:N_steps);
+
 % Vị trí 3 đường [N, E, D]
-pos_fossen   = f_data.pos_history;      % 1. Fossen Standalone (Ground Truth lý tưởng)
-pos_true_ekf = e_data.pos_true_hist;    % 2. Tàu thật (có ES-EKF khép vòng)
-pos_est_ekf  = e_data.pos_est_hist;     % 3. ES-EKF ước lượng
+pos_fossen   = f_data.pos_history(1:N_steps, :);      % 1. Fossen Standalone (Ground Truth lý tưởng)
+pos_true_ekf = e_data.pos_true_hist(1:N_steps, :);    % 2. Tàu thật (có ES-EKF khép vòng)
+pos_est_ekf  = e_data.pos_est_hist(1:N_steps, :);     % 3. ES-EKF ước lượng
 
 % Vận tốc thân tàu & chuyển đổi sang NED cho Fossen Standalone
 v_ned_fossen = zeros(N_steps, 3);
@@ -59,8 +62,8 @@ for k = 1:N_steps
 end
 
 % Vận tốc NED của Tàu thật và ES-EKF ước lượng
-vel_true_ekf = e_data.vel_true_hist;    % [v_N, v_E, v_D] Tàu thật
-vel_est_ekf  = e_data.vel_est_hist;     % [v_N, v_E, v_D] ES-EKF ước lượng
+vel_true_ekf = e_data.vel_true_hist(1:N_steps, :);    % [v_N, v_E, v_D] Tàu thật
+vel_est_ekf  = e_data.vel_est_hist(1:N_steps, :);     % [v_N, v_E, v_D] ES-EKF ước lượng
 
 % Sai số vị trí
 err_pos_ekf = pos_true_ekf - pos_est_ekf;            % Tàu thật - ES-EKF
@@ -74,12 +77,12 @@ err_vel_ekf = vel_true_ekf - vel_est_ekf;
 err_vel_norm = sqrt(sum(err_vel_ekf.^2, 2));
 
 % Dữ liệu Boresight & Scale
-bs_est_deg = rad2deg(e_data.boresight_est_hist);
+bs_est_deg = rad2deg(e_data.boresight_est_hist(1:N_steps, :));
 bs_true_deg = rad2deg(e_data.true_boresight(:)');
-scale_est_pct = e_data.scale_est_hist * 100;
+scale_est_pct = e_data.scale_est_hist(1:N_steps) * 100;
 scale_true_pct = e_data.true_scale * 100;
-cov_bs_deg = rad2deg(e_data.cov_bs_hist);
-cov_scale_pct = e_data.cov_scale_hist * 100;
+cov_bs_deg = rad2deg(e_data.cov_bs_hist(1:N_steps, :));
+cov_scale_pct = e_data.cov_scale_hist(1:N_steps) * 100;
 
 %% 2. BIỂU ĐỒ 1: QUỸ ĐẠO 3D TOÀN MÀN HÌNH (TỰ DO ZOOM & XOAY 3D BẰNG CHUỘT, KHÔNG SUBPLOT)
 fig1 = figure('Name', 'Tab 1: Quy Dao 3D (Fossen vs Tau That vs ES-EKF)', ...

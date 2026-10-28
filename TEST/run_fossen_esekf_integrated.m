@@ -100,7 +100,11 @@ end
 % Tự động tính toán đảm bảo T_final luôn đủ thời gian để tàu đi hết toàn bộ các Waypoints
 wp_dists = sqrt(diff(wpt.pos.x).^2 + diff(wpt.pos.y).^2 + diff(wpt.pos.z).^2);
 total_path_len = sum(wp_dists);
-T_est_conservative = ceil(total_path_len / 1.0 * 1.5 + 400); % Tốc độ thận trọng 1.0 m/s + 50% dự phòng
+v_plan_min = 1.5;
+if isfield(wpt, 'speed') && ~isempty(wpt.speed)
+    v_plan_min = max(0.8, min(wpt.speed));
+end
+T_est_conservative = ceil(total_path_len / v_plan_min * 1.25 + 600);
 if T_final < T_est_conservative
     T_final = T_est_conservative;
 end
@@ -189,12 +193,17 @@ if use_mag
     % Nhiễu hướng do nhiễu trắng từ kế: sigma_m / H (rad), lấy mẫu 5 Hz
     sigma_mag_head_noise = (ins_spec.mag.noise_density / sqrt(dt_dvl)) / mag_H_horiz;
     % Sai số bù nghiêng: sai số roll/pitch ước lượng lọt vào hướng qua tan(độ từ khuynh)
-    % (lấy 0.05 deg = sai số roll/pitch tĩnh theo datasheet VN-210-S)
     sigma_mag_tilt = tan(ins_spec.mag.inclination) * deg2rad(ins_spec.pitch_roll_static_deg);
-    sigma_mag_yaw = sqrt(sigma_mag_head_noise^2 + sigma_mag_tilt^2);
+
+    % Độ lệch chuẩn góc hướng từ kế đồng bộ theo datasheet VN-210-S (2.0 deg RMS)
+    if isfield(ins_spec, 'heading_accuracy_mag_deg') && ~isempty(ins_spec.heading_accuracy_mag_deg)
+        sigma_mag_yaw = deg2rad(ins_spec.heading_accuracy_mag_deg);
+    else
+        sigma_mag_yaw = deg2rad(2.0);
+    end
     cfg(22) = ins_spec.mag.declination;   % LÝ TƯỞNG: bộ lọc biết chính xác độ từ thiên (WMM)
     cfg(23) = sigma_mag_yaw;
-    fprintf('Tu ke             : BAT (ly tuong), sigma huong = %.3f deg, dung ca khi noi va khi lan\n', ...
+    fprintf('Tu ke             : BAT (dong bo datasheet VN-210-S), sigma huong = %.2f deg, dung ca khi noi va khi lan\n', ...
         rad2deg(sigma_mag_yaw));
 else
     sigma_mag_yaw = NaN;
@@ -388,23 +397,47 @@ for i = 1:nTimeSteps
             flags(3) = 1;
         end
 
-        % Từ kế 3 trục 5 Hz: có CẢ khi nổi và khi lặn (nước biển không chắn từ trường)
+        % Từ kế 3 trục 5 Hz: có CẢ khi nổi và khi lặn
         if use_mag
-            mag_meas = sensor_fn('mag', ins_spec, Cbn_true, dt_dvl);
+            if t(i) > T_gnss_cut
+                % Cách 2: Bơm sai số góc hướng 3.0 độ khi lặn ngầm (mô phỏng dị thường từ đáy biển / lệch la bàn)
+                yaw_bias_sub = deg2rad(3.0);
+                R_z_bias = [ cos(yaw_bias_sub), -sin(yaw_bias_sub), 0; ...
+                             sin(yaw_bias_sub),  cos(yaw_bias_sub), 0; ...
+                             0,                  0,                 1];
+                Cbn_mag = R_z_bias * Cbn_true;
+            else
+                Cbn_mag = Cbn_true;
+            end
+            mag_meas = sensor_fn('mag', ins_spec, Cbn_mag, dt_dvl, imu_state, n_p);
             flags(4) = 1;
         end
 
-        % GNSS RTK ở mặt nước (chỉ có khi t <= T_gnss_cut và ở mặt nước zn <= 0.5m)
-        if t(i) <= T_gnss_cut && zn <= 0.5
+        % GNSS RTK ở mặt nước: CHỈ hoạt động trong pha chạy mặt nước ban đầu (t <= T_gnss_cut)
+        % để phục vụ hiệu chuẩn trực tuyến Boresight và Scale Factor DVL.
+        % Sau khi đã cắt GNSS (t > T_gnss_cut), GNSS KHÔNG BAO GIỜ được cập nhật vào ES-EKF nữa,
+        % kể cả khi tàu ngoi lên mặt nước ở đích đến. Mục đích ngoi lên ở đích là để ĐỐI CHIẾU
+        % sai số hoa tiêu ngầm Dead Reckoning với mốc thật, TUYỆT ĐỐI KHÔNG cập nhật đè để xóa sai số.
+        if zn <= 0.5 && t(i) <= T_gnss_cut
             if isfield(ins_spec.gnss, 'single_antenna_mode') && ins_spec.gnss.single_antenna_mode
                 gnss_meas = sensor_fn('gnss', ins_spec, [xn; yn; zn], v_ned_true, NaN);
             else
                 gnss_meas = sensor_fn('gnss', ins_spec, [xn; yn; zn], v_ned_true, psi);
             end
             flags(1) = 1;
-            cfg(21) = 0; % Mặt nước có GNSS: cho phép hiệu chuẩn Boresight & Scale
+        end
+
+        % Khóa hiệu chuẩn Boresight và Scale Factor DVL:
+        % - Trong pha khởi tạo ban đầu (t <= T_gnss_cut) với cơ động số 8: cho phép hiệu chuẩn trực tuyến (cfg(21) = 0).
+        % - Sau khi hoàn thành cơ động ban đầu (t > T_gnss_cut): KHÓA CHẶT (cfg(21) = 1).
+        %   Lý do: Góc Boresight và Scale Factor là sai số lắp đặt cơ khí cố định của phần cứng,
+        %   sau khi đã hội tụ chuẩn thì phải khóa lại. Không mở lại khi ngoi lên giữa chặng
+        %   vì trên đường chạy thẳng hoặc chịu sóng mặt nước, DVL thiếu kích thích đa trục (unobservable)
+        %   sẽ làm lệch/xoắn các góc Boresight đã hội tụ.
+        if t(i) <= T_gnss_cut
+            cfg(21) = 0;
         else
-            cfg(21) = 1; % Lặn ngầm mất GNSS: KHÓA hiệu chuẩn Boresight & Scale để tránh trôi dạt góc khi cơ động
+            cfg(21) = 1;
         end
     end
 
@@ -464,8 +497,8 @@ for i = 1:nTimeSteps
                     switch head_src
                         case 'tu ke'
                             % Nhiễu từ kế (giảm theo số mẫu) + sai số bù nghiêng do roll0/pitch0
-                            sigma_psi0 = sqrt(sigma_mag_head_noise^2 / head_count + ...
-                                (tan(ins_spec.mag.inclination) * sigma_rp0)^2);
+                            sigma_psi0 = max(sigma_mag_yaw / sqrt(head_count), ...
+                                sqrt(sigma_mag_head_noise^2 / head_count + (tan(ins_spec.mag.inclination) * sigma_rp0)^2));
                         case 'GNSS 2 ang-ten'
                             sigma_psi0 = sigma_gps_yaw / sqrt(head_count);
                         otherwise
@@ -643,10 +676,31 @@ for i = 1:nTimeSteps
     end
     ui_curr = ui;
 
-    % 4.9. Kiểm tra cập mốc và tự động dừng khi đến đích cuối cùng
+    % 4.9. Kiểm tra cập mốc và tự động dừng khi đến đích cuối cùng (chuẩn hóa tổng quát)
     if curr_wp_idx < length(wpt.pos.x)
-        dist_to_curr = norm([xn - wpt.pos.x(curr_wp_idx); yn - wpt.pos.y(curr_wp_idx); zn - wpt.pos.z(curr_wp_idx)]);
-        if dist_to_curr < R_switch
+        % Tính khoảng cách mốc hiện tại theo cả tọa độ ước lượng (hệ điều khiển bám) và tọa độ thật
+        dist_curr_est  = norm([p_hat(1) - wpt.pos.x(curr_wp_idx); p_hat(2) - wpt.pos.y(curr_wp_idx); p_hat(3) - wpt.pos.z(curr_wp_idx)]);
+        dist_curr_true = norm([xn - wpt.pos.x(curr_wp_idx); yn - wpt.pos.y(curr_wp_idx); zn - wpt.pos.z(curr_wp_idx)]);
+        
+        % Vector chỉ phương của chặng đường hiện tại
+        if curr_wp_idx > 1
+            v_leg = [wpt.pos.x(curr_wp_idx) - wpt.pos.x(curr_wp_idx-1); ...
+                     wpt.pos.y(curr_wp_idx) - wpt.pos.y(curr_wp_idx-1); ...
+                     wpt.pos.z(curr_wp_idx) - wpt.pos.z(curr_wp_idx-1)];
+        else
+            v_leg = [wpt.pos.x(2) - wpt.pos.x(1); ...
+                     wpt.pos.y(2) - wpt.pos.y(1); ...
+                     wpt.pos.z(2) - wpt.pos.z(1)];
+        end
+        v_to_curr_est  = [p_hat(1) - wpt.pos.x(curr_wp_idx); p_hat(2) - wpt.pos.y(curr_wp_idx); p_hat(3) - wpt.pos.z(curr_wp_idx)];
+        v_to_curr_true = [xn - wpt.pos.x(curr_wp_idx); yn - wpt.pos.y(curr_wp_idx); zn - wpt.pos.z(curr_wp_idx)];
+        
+        % Tiêu chuẩn chuyển mốc tổng quát hàng hải (Half-plane / Orthogonal boundary):
+        % Chuyển mốc khi: lọt vào bán kính R_switch (ước lượng hoặc thật) HOẶC đã vượt qua mặt phẳng vuông góc của mốc
+        passed_plane = (dot(v_to_curr_est, v_leg) >= 0 && dist_curr_est < R_switch * 3) || ...
+                       (dot(v_to_curr_true, v_leg) >= 0 && dist_curr_true < R_switch * 3);
+        
+        if (dist_curr_est < R_switch) || (dist_curr_true < R_switch) || passed_plane
             curr_wp_idx = curr_wp_idx + 1;
         end
     else
@@ -654,10 +708,14 @@ for i = 1:nTimeSteps
         dist_to_dest_true = norm([xn - wpt.pos.x(end); yn - wpt.pos.y(end); zn - wpt.pos.z(end)]);
         dist_to_dest_est  = norm([p_hat(1) - wpt.pos.x(end); p_hat(2) - wpt.pos.y(end); p_hat(3) - wpt.pos.z(end)]);
         
-        % Chiếu dọc theo chặng cuối: tàu chạm hoặc vượt qua mặt cắt vuông góc của mốc đích
-        v_leg = [wpt.pos.x(end) - wpt.pos.x(end-1); wpt.pos.y(end) - wpt.pos.y(end-1); wpt.pos.z(end) - wpt.pos.z(end-1)];
-        v_to_wpt = [p_hat(1) - wpt.pos.x(end); p_hat(2) - wpt.pos.y(end); p_hat(3) - wpt.pos.z(end)];
-        passed_dest = (dot(v_to_wpt, v_leg) >= 0) && (dist_to_dest_est < R_switch * 4);
+        v_leg_dest = [wpt.pos.x(end) - wpt.pos.x(end-1); ...
+                      wpt.pos.y(end) - wpt.pos.y(end-1); ...
+                      wpt.pos.z(end) - wpt.pos.z(end-1)];
+        v_to_dest_est  = [p_hat(1) - wpt.pos.x(end); p_hat(2) - wpt.pos.y(end); p_hat(3) - wpt.pos.z(end)];
+        v_to_dest_true = [xn - wpt.pos.x(end); yn - wpt.pos.y(end); zn - wpt.pos.z(end)];
+        
+        passed_dest = (dot(v_to_dest_est, v_leg_dest) >= 0 && dist_to_dest_est < R_switch * 3) || ...
+                      (dot(v_to_dest_true, v_leg_dest) >= 0 && dist_to_dest_true < R_switch * 3);
 
         if dist_to_dest_est < R_switch * 1.5 || dist_to_dest_true < R_switch * 1.5 || passed_dest
             fprintf('\n[ĐẾN ĐÍCH] Tàu đã hoàn thành toàn bộ %d Waypoints và cập đích tại t = %.1f s!\n', ...
@@ -733,9 +791,9 @@ leg_labels  = {};
 
 if has_fossen
     % Chỉ vẽ Fossen Standalone nếu cùng tập Waypoint đích (tránh lệch file cũ)
-    if isfield(fossen_data, 'wpt') && ...
-       numel(fossen_data.wpt.pos.x) == numel(wpt.pos.x) && ...
-       norm([fossen_data.wpt.pos.x(end) - wpt.pos.x(end); fossen_data.wpt.pos.y(end) - wpt.pos.y(end)]) < 50
+    if isfield(f_data, 'wpt') && ...
+       numel(f_data.wpt.pos.x) == numel(wpt.pos.x) && ...
+       norm([f_data.wpt.pos.x(end) - wpt.pos.x(end); f_data.wpt.pos.y(end) - wpt.pos.y(end)]) < 50
         h_fossen = plot3(pos_fossen(:, 2), pos_fossen(:, 1), pos_fossen(:, 3), ...
             'Color', [0, 0.55, 0], 'LineStyle', '--', 'LineWidth', 2.2);
         hold on;
@@ -916,7 +974,7 @@ fprintf('Boresight Yaw   : Uoc luong = %6.3f deg | That = %6.3f deg | Sai so = %
 fprintf('Scale Factor DVL: Uoc luong = %6.3f %%   | That = %6.3f %%   | Sai so = %6.3f %%\n', ...
     final_scale_pct, true_scale_pct, err_scale_pct);
 fprintf('Sai so vi tri 3D cuoi cung: %.2f m (Sau %.0fs hanh trinh va mat GNSS tu giay %.0f)\n', ...
-    pos_err_norm(end), T_final, T_gnss_cut);
+    pos_err_norm(end), t(end), T_gnss_cut);
 fprintf('=========================================================================\n');
 
 if nargout > 0
