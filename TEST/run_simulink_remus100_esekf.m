@@ -11,11 +11,7 @@ if nargin < 1 || isempty(sim_time)
     sim_time = 2668; % Thời gian hoàn thành 12 Waypoints
 end
 if nargin < 2 || isempty(injected_yaw_deg)
-    if evalin('base', 'exist(''injected_yaw_submerged_deg'', ''var'')')
-        injected_yaw_deg = evalin('base', 'injected_yaw_submerged_deg');
-    else
-        injected_yaw_deg = 1.0; % Mặc định 1.0 độ cho kịch bản Stress Test
-    end
+    injected_yaw_deg = 1.0; % Mặc định 1.0 độ cho kịch bản Stress Test
 end
 
 script_dir = fileparts(mfilename('fullpath'));

@@ -119,11 +119,7 @@ assignin('base', 'true_scale', true_scale);
 
 % 6. Góc lệch hướng bơm vào EKF lúc bắt đầu lặn ngầm (mặc định 1.0 độ theo yêu cầu test)
 if nargin < 1 || isempty(injected_yaw_deg)
-    if evalin('base', 'exist(''injected_yaw_submerged_deg'', ''var'')')
-        injected_yaw_deg = evalin('base', 'injected_yaw_submerged_deg');
-    else
-        injected_yaw_deg = 1.0;
-    end
+    injected_yaw_deg = 1.0;
 end
 assignin('base', 'injected_yaw_submerged_deg', injected_yaw_deg);
 
