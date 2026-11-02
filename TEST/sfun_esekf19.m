@@ -227,8 +227,8 @@ N_level = round(2.0 / h); % 2 giây leveling = 200 mẫu ở 100 Hz
 N_head  = 5;              % 5 mẫu đo hướng (1 giây ở 5 Hz)
 upd_stat = zeros(4, 1);
 
-% Quản lý tự động khóa GNSS khi lặn ngầm (sau chặng nổi hiệu chuẩn 410s)
-if t_curr >= 410.0 && flags(2) ~= 0 && depth_meas > 0.5 && gnss_cut == 0
+% Quản lý tự động khóa GNSS khi lặn ngầm theo độ sâu đo được từ cảm biến áp suất
+if flags(2) ~= 0 && depth_meas > 0.5 && gnss_cut == 0
     gnss_cut = 1;
     % Bơm bước nhảy sai số góc hướng vào EKF tại thời điểm bắt đầu lặn ngầm
     yaw_bias_deg = 1.0;
@@ -244,12 +244,13 @@ if t_curr >= 410.0 && flags(2) ~= 0 && depth_meas > 0.5 && gnss_cut == 0
                  qc(3)*dq(1) - qc(2)*dq(4); ...
                  qc(1)*dq(4) + qc(4)*dq(1)];
         state_est(7:10) = q_new / norm(q_new);
-        fprintf('\n[EKF FAULT INJECTION] Đã bơm sai số hướng %+5.2f độ vào EKF tại t = %.1f s!\n', yaw_bias_deg, t_curr);
+        fprintf('\n[EKF FAULT INJECTION] Tàu lặn độ sâu = %.2f m: Đã bơm sai số hướng %+5.2f độ vào EKF!\n', ...
+            depth_meas, yaw_bias_deg);
     end
 end
-if gnss_cut == 1
-    flags(1) = 0;   % Cắt GNSS vĩnh viễn
-    cfg(21)  = 1;   % Khóa hiệu chuẩn Boresight và Scale Factor
+if depth_meas > 0.5
+    flags(1) = 0;   % Tự động vô hiệu hóa GNSS khi ngập nước
+    cfg(21)  = 1;   % Tự động khóa hiệu chuẩn Boresight và Scale Factor
 else
     cfg(21)  = 0;   % Cho phép hiệu chuẩn trực tuyến khi nổi
 end

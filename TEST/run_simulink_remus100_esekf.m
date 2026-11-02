@@ -147,7 +147,7 @@ dist_step = sqrt(sum(diff_pos.^2, 2));
 total_dist = sum(dist_step);
 pct_dt = (pos_err_norm(end) / max(total_dist, 1)) * 100;
 
-idx_dive = find(t >= 410.0, 1);
+idx_dive = find(pos_true_hist(:, 3) > 0.5, 1);
 if isempty(idx_dive), idx_dive = 1; end
 dist_dive = sum(dist_step(idx_dive:end));
 
@@ -162,7 +162,7 @@ fprintf('Boresight Yaw               : Ước lượng = %6.3f deg | Thật = %6
 fprintf('Scale Factor DVL            : Ước lượng = %6.3f %%   | Thật = %6.3f %%   | Sai số = %6.3f %%   (%s)\n', ...
     final_scale, true_scale_pct, err_scale, pass_str(err_scale < 1.0));
 fprintf('Tổng cự ly hành trình       : %.2f km (%.1f m)\n', total_dist / 1000, total_dist);
-fprintf('Quãng đường lặn ngầm (>410s): %.2f km (%.1f m)\n', dist_dive / 1000, dist_dive);
+fprintf('Quãng đường lặn ngầm (z>0.5m): %.2f km (%.1f m)\n', dist_dive / 1000, dist_dive);
 fprintf('Sai số vị trí 3D cuối cùng  : %.2f m sau %.1f s\n', pos_err_norm(end), t(end));
 fprintf('Tỉ lệ sai số / Tổng quãng đường: %.3f %% DT (Chuẩn < 1.0 %% DT: %s)\n', pct_dt, pass_str(pct_dt < 1.0));
 fprintf('Độ trôi ngang lý thuyết     : %.2f m (theo công thức D_ngầm x sin(%.1f°))\n', dist_dive * abs(sin(deg2rad(injected_yaw_deg))), injected_yaw_deg);
