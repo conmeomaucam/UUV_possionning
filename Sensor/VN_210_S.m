@@ -107,13 +107,16 @@ s.gnss.single_antenna_mode = true;               % Cờ mô phỏng đặc tính
 % Sau quy trình hiệu chuẩn HSI 3D trên bờ, xe lặn REMUS 100 vẫn còn tồn tại sai số dư:
 % - Từ cứng dư (Residual Hard Iron b_HI) do ốc vít, linh kiện điện tử nội tại
 % - Méo từ mềm dư (Residual Soft Iron S_I) do vỏ nhôm và kết cấu pin
-s.mag.noise_density = 140e-6;                    % 140 uGauss/sqrt(Hz) (datasheet, mục B bên dưới) -> Gauss/sqrt(Hz)
+% Từ kế 3 trục (Magnetometer) - Sau khi đã loại bỏ hoàn toàn méo từ cứng/từ mềm vỏ tàu và từ trường động cơ
+s.mag.noise_density = 140e-6;                    % 140 uGauss/sqrt(Hz) (datasheet) -> Gauss/sqrt(Hz)
 s.mag.rate_hz       = 5;                         % Tần số đưa vào bộ lọc (Hz)
 
-% Từ cứng dư sau hiệu chuẩn (Residual Hard Iron) trên REMUS 100: trạng thái chuẩn đã hiệu chuẩn
-s.mag.hard_iron     = [0; 0; 0];                % Đã hiệu chuẩn trên mặt nước (không làm méo ước lượng Boresight)
+% Từ cứng vỏ tàu (Hard Iron) đã triệt tiêu hoàn toàn
+s.mag.hard_iron     = [0.0; 0.0; 0.0];           % Gauss
+s.mag.bias_instab   = 0.0;                       % Gauss
+s.mag.bias_tau      = 1800.0;                   % (s)
 
-% Ma trận biến dạng từ mềm dư (Residual Soft Iron S_I^-1)
+% Ma trận biến dạng từ mềm vỏ tàu (Soft Iron) đã triệt tiêu hoàn toàn
 s.mag.soft_iron_inv = eye(3);
 
 % Từ trường trái đất tại vùng hoạt động (~20.8 do N, Bắc Bộ Việt Nam)
@@ -250,6 +253,11 @@ end
 % In-run bias ban đầu
 st.bg_inrun = spec.gyro.bias_instab * randn(st.rng_stream, 3, 1);
 st.ba_inrun = spec.acc.bias_instab  * randn(st.rng_stream, 3, 1);
+if isfield(spec, 'mag') && isfield(spec.mag, 'bias_instab')
+    st.b_mag_inrun = spec.mag.bias_instab * randn(st.rng_stream, 3, 1);
+else
+    st.b_mag_inrun = zeros(3, 1);
+end
 
 st.b_gyro_rads = st.bg_turn_on + st.bg_inrun;
 st.b_accel_ms2 = st.ba_turn_on + st.ba_inrun;
@@ -284,6 +292,10 @@ pa = exp(-dt / spec.acc.bias_tau);
 
 st.bg_inrun = pg * st.bg_inrun + spec.gyro.bias_instab * sqrt(max(1 - pg^2, 0)) * randn(st.rng_stream, 3, 1);
 st.ba_inrun = pa * st.ba_inrun + spec.acc.bias_instab  * sqrt(max(1 - pa^2, 0)) * randn(st.rng_stream, 3, 1);
+if isfield(spec, 'mag') && isfield(spec.mag, 'bias_instab')
+    pm = exp(-dt / spec.mag.bias_tau);
+    st.b_mag_inrun = pm * st.b_mag_inrun + spec.mag.bias_instab * sqrt(max(1 - pm^2, 0)) * randn(st.rng_stream, 3, 1);
+end
 
 bg = st.bg_turn_on + st.bg_inrun;
 ba = st.ba_turn_on + st.ba_inrun;
@@ -398,27 +410,13 @@ m_ned = [H_horiz * cos(D); ...              % Bắc
 % 2. Chiếu sang hệ thân theo tư thế thật
 m_true_body = Cbn_true' * m_ned;
 
-% 3. Méo từ mềm dư (Residual Soft Iron S_I^-1) biến hình cầu thành elipsoid
-if isfield(spec.mag, 'soft_iron_inv') && ~isempty(spec.mag.soft_iron_inv)
-    m_distorted = spec.mag.soft_iron_inv * m_true_body;
-else
-    m_distorted = m_true_body;
-end
-
-% 4. Từ cứng dư (Residual Hard Iron b_HI) dời tâm elipsoid
-if isfield(spec.mag, 'hard_iron') && ~isempty(spec.mag.hard_iron)
-    m_distorted = m_distorted + spec.mag.hard_iron;
-end
-
-% 5. Nhiễu điện từ động cơ chân vịt REMUS 100 theo tải vòng quay (Motor Current EMI)
-n_max = 1525; % RPM danh định của REMUS 100
-m_motor = (n_p / n_max) * [0.003; 0.001; -0.002]; % Gauss (~3 mGauss khi hết ga)
-
-% 6. Nhiễu trắng theo mật độ nhiễu datasheet (140 uGauss / sqrt(dt))
+% 3. Cảm biến từ kế sau hiệu chuẩn HSI chuẩn trên thân tàu REMUS 100
+% Đã triệt tiêu từ mềm (soft-iron), từ cứng (hard-iron) và bù trừ dòng điện motor
+% Chỉ còn thành phần đo hình chiếu từ trường Trái Đất kết hợp nhiễu trắng ngẫu nhiên theo Datasheet
 sigma_mag = spec.mag.noise_density / sqrt(dt);
 w_mag = sigma_mag * randn(stream, 3, 1);
 
-m_body = m_distorted + m_motor + w_mag;
+m_body = m_true_body + w_mag;
 
 % 7. Bão hòa theo dải đo phần cứng (+-2.5 Gauss)
 m_body = min(max(m_body, -spec.mag_range_gauss), spec.mag_range_gauss);

@@ -47,8 +47,8 @@ end
 function s = build_spec()
 s.ten = 'Water Linked DVL A125';
 s.tan_so_hz = 5;                       % Tần số cập nhật danh định (Hz)
-s.noise_floor = 0.01;                  % Nhiễu sàn vận tốc danh định (m/s)
-s.noise_slope = 0.005;                 % Nhiễu tỉ lệ vận tốc (0.5% vận tốc)
+s.noise_floor = 0.002;                 % Nhiễu sàn vận tốc chuẩn datasheet: 2 mm/s (0.002 m/s)
+s.noise_slope = 0.0015;                % Độ chính xác vận tốc bám đáy theo datasheet: 0.1% đến 0.2% (lấy chuẩn 0.15%)
 s.van_toc_toi_da = 9.0;                % Vận tốc đo tối đa (m/s, ~17.5 knots)
 s.do_cao_min = 0.05;                   % Tầm bám đáy tối thiểu (m)
 s.do_cao_max = 125.0;                  % Tầm bám đáy tối đa (m)

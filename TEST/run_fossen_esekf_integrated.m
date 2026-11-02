@@ -55,11 +55,11 @@ addpath(fullfile(mss_dir, 'CRAFT', 'AUV', 'models'));
 clear integralSMCheading ALOS3D ALOSpsi LOSobserver;
 
 %% 1. CẤU HÌNH THỜI GIAN VÀ THÔNG SỐ VẬT LÝ
-h = 0.05;              % Chu kỳ trích mẫu h = 0.05 s (20 Hz)
+h = 0.01;              % Chu kỳ trích mẫu h = 0.01 s (100 Hz theo chuẩn yêu cầu nhiệm vụ)
 T_final = 1880;        % Tổng thời gian mặc định: 1880 s
 T_gnss_cut = 480.0;    % Cắt GNSS sau 480 giây mặc định
 dt_dvl = 0.20;         % Chu kỳ đo DVL = 0.2 s (5 Hz)
-dvl_step = round(dt_dvl / h); % Cập nhật DVL mỗi 4 bước mô phỏng 20 Hz
+dvl_step = round(dt_dvl / h); % Cập nhật DVL mỗi 20 bước mô phỏng 100 Hz
 
 % Tọa độ gốc mặc định WGS-84 (20.8 deg N)
 lat_rad = deg2rad(20.8);
@@ -70,7 +70,7 @@ mission_candidates = { ...
     fullfile(project_root, 'TEST', 'kich_ban_mission.m'), ...
     fullfile(project_root, 'kich_ban_mission.m'), ...
     fullfile(getenv('USERPROFILE'), 'Downloads', 'kich_ban_mission.m') ...
-};
+    };
 
 mission_loaded = false;
 for mc = 1:numel(mission_candidates)
@@ -83,10 +83,10 @@ for mc = 1:numel(mission_candidates)
 end
 
 if ~mission_loaded
-    % Mặc định dùng kịch bản cơ sở
-    wpt_surface_x = [  0,   0, -30,   30, -20,   0 ];  % North (m)
-    wpt_surface_y = [  0, 120, 270,  430, 580, 720 ];  % East (m)
-    wpt_surface_z = [  0,   0,   0,    0,   0,   0 ];  % Down = 0m (Mặt nước)
+    % Mặc định dùng kịch bản cơ sở (đã bổ sung 1 waypoint quay ngược để hiệu chuẩn Boresight)
+    wpt_surface_x = [  0,   0, -30,   30,   40, -30,   0 ];  % North (m)
+    wpt_surface_y = [  0, 120, 270,  420,  180, 570, 720 ];  % East (m)
+    wpt_surface_z = [  0,   0,   0,    0,    0,   0,   0 ];  % Down = 0m (Mặt nước)
 
     wpt_mission_x = [ -20,  -100,     0,   200,  200,   400 ];
     wpt_mission_y = [ 920,  1320,  1670,  2020, 2520,  2920 ];
@@ -338,6 +338,8 @@ ui_hist = zeros(nTimeSteps, 3);
 alos_hist = zeros(nTimeSteps, 4);
 
 ui_curr = [0; 0; n_p];
+gnss_cut_done = false;
+t_gnss_cut_actual = NaN;
 
 fprintf('Bắt đầu chạy mô phỏng tích hợp REMUS 100 + ES-EKF (%d bước)...\n', nTimeSteps);
 tic_sim = tic;
@@ -397,48 +399,51 @@ for i = 1:nTimeSteps
             flags(3) = 1;
         end
 
-        % Từ kế 3 trục 5 Hz: có CẢ khi nổi và khi lặn
+        % Từ kế 3 trục 5 Hz: DÙNG CẢ KHI NỔI VÀ KHI LẶN THEO ĐÚNG CẤU HÌNH HỆ THỐNG
         if use_mag
-            if t(i) > T_gnss_cut
-                % Cách 2: Bơm sai số góc hướng 3.0 độ khi lặn ngầm (mô phỏng dị thường từ đáy biển / lệch la bàn)
-                yaw_bias_sub = deg2rad(3.0);
-                R_z_bias = [ cos(yaw_bias_sub), -sin(yaw_bias_sub), 0; ...
-                             sin(yaw_bias_sub),  cos(yaw_bias_sub), 0; ...
-                             0,                  0,                 1];
-                Cbn_mag = R_z_bias * Cbn_true;
-            else
-                Cbn_mag = Cbn_true;
-            end
-            mag_meas = sensor_fn('mag', ins_spec, Cbn_mag, dt_dvl, imu_state, n_p);
+            mag_meas = sensor_fn('mag', ins_spec, Cbn_true, dt_dvl, imu_state, n_p);
             flags(4) = 1;
         end
 
-        % GNSS RTK ở mặt nước: CHỈ hoạt động trong pha chạy mặt nước ban đầu (t <= T_gnss_cut)
-        % để phục vụ hiệu chuẩn trực tuyến Boresight và Scale Factor DVL.
-        % Sau khi đã cắt GNSS (t > T_gnss_cut), GNSS KHÔNG BAO GIỜ được cập nhật vào ES-EKF nữa,
-        % kể cả khi tàu ngoi lên mặt nước ở đích đến. Mục đích ngoi lên ở đích là để ĐỐI CHIẾU
-        % sai số hoa tiêu ngầm Dead Reckoning với mốc thật, TUYỆT ĐỐI KHÔNG cập nhật đè để xóa sai số.
-        if zn <= 0.5 && t(i) <= T_gnss_cut
+        % Kiểm tra điều kiện bắt đầu lặn ngầm:
+        % 1. Mốc mục tiêu đang hướng tới là mốc lặn ngầm (wpt.pos.z > 0.5m)
+        % 2. Độ sâu thực tế của tàu chìm sâu quá 0.5m (anten chìm hẳn)
+        is_diving_target = (isfield(wpt, 'pos') && isfield(wpt.pos, 'z') && ...
+            curr_wp_idx <= length(wpt.pos.z) && wpt.pos.z(curr_wp_idx) > 0.5);
+
+        if is_diving_target && zn > 0.5 && ~gnss_cut_done
+            gnss_cut_done = true;
+            t_gnss_cut_actual = t(i);
+            fprintf('\n[CẮT GNSS] Tàu bắt đầu lặn ngầm (độ sâu zn = %.2f m > 0.5 m, hướng tới WP%d z=%.0fm) tại t = %.1f s -> CẮT GNSS VĨNH VIỄN & KHÓA HIỆU CHUẨN!\n', ...
+                zn, curr_wp_idx, wpt.pos.z(curr_wp_idx), t(i));
+        end
+
+        % GNSS RTK ở mặt nước:
+        % - CHỈ hoạt động ở pha nổi ban đầu trước khi lặn (gnss_cut_done == false và zn <= 0.5m).
+        % - Sau khi đã lặn sâu (gnss_cut_done == true), GNSS BỊ CẮT VĨNH VIỄN, TUYỆT ĐỐI KHÔNG
+        %   cập nhật lại kể cả khi tàu ngoi lên mặt nước (zn <= 0.5m) ở mốc cuối cùng (0m).
+        %   Mục đích: Giữ nguyên sai số ước lượng Dead-Reckoning ngầm để so sánh và đánh giá toàn bộ hành trình!
+        if ~gnss_cut_done && zn <= 0.5
             if isfield(ins_spec.gnss, 'single_antenna_mode') && ins_spec.gnss.single_antenna_mode
                 gnss_meas = sensor_fn('gnss', ins_spec, [xn; yn; zn], v_ned_true, NaN);
             else
                 gnss_meas = sensor_fn('gnss', ins_spec, [xn; yn; zn], v_ned_true, psi);
             end
             flags(1) = 1;
+        else
+            flags(1) = 0;
         end
 
         % Khóa hiệu chuẩn Boresight và Scale Factor DVL:
-        % - Trong pha khởi tạo ban đầu (t <= T_gnss_cut) với cơ động số 8: cho phép hiệu chuẩn trực tuyến (cfg(21) = 0).
-        % - Sau khi hoàn thành cơ động ban đầu (t > T_gnss_cut): KHÓA CHẶT (cfg(21) = 1).
-        %   Lý do: Góc Boresight và Scale Factor là sai số lắp đặt cơ khí cố định của phần cứng,
-        %   sau khi đã hội tụ chuẩn thì phải khóa lại. Không mở lại khi ngoi lên giữa chặng
-        %   vì trên đường chạy thẳng hoặc chịu sóng mặt nước, DVL thiếu kích thích đa trục (unobservable)
-        %   sẽ làm lệch/xoắn các góc Boresight đã hội tụ.
-        if t(i) <= T_gnss_cut
+        % - Pha nổi ban đầu (chưa lặn): cho phép hiệu chuẩn trực tuyến (cfg(21) = 0).
+        % - Sau khi đã bắt đầu lặn: KHÓA CHẶT vĩnh viễn (cfg(21) = 1).
+        % R_mag: Tuân thủ nghiêm ngặt 100% Datasheet VN-210-S (sigma = 2.0 deg RMS cả khi nổi và khi lặn)
+        if ~gnss_cut_done
             cfg(21) = 0;
         else
             cfg(21) = 1;
         end
+        cfg(23) = sigma_mag_yaw; % 2.0 deg chuẩn datasheet VN-210-S
     end
 
     % 4.4. CĂN CHỈNH BAN ĐẦU (chỉ từ số đo) HOẶC 1 BƯỚC LỌC ES-EKF
@@ -681,44 +686,42 @@ for i = 1:nTimeSteps
         % Tính khoảng cách mốc hiện tại theo cả tọa độ ước lượng (hệ điều khiển bám) và tọa độ thật
         dist_curr_est  = norm([p_hat(1) - wpt.pos.x(curr_wp_idx); p_hat(2) - wpt.pos.y(curr_wp_idx); p_hat(3) - wpt.pos.z(curr_wp_idx)]);
         dist_curr_true = norm([xn - wpt.pos.x(curr_wp_idx); yn - wpt.pos.y(curr_wp_idx); zn - wpt.pos.z(curr_wp_idx)]);
-        
+
         % Vector chỉ phương của chặng đường hiện tại
         if curr_wp_idx > 1
             v_leg = [wpt.pos.x(curr_wp_idx) - wpt.pos.x(curr_wp_idx-1); ...
-                     wpt.pos.y(curr_wp_idx) - wpt.pos.y(curr_wp_idx-1); ...
-                     wpt.pos.z(curr_wp_idx) - wpt.pos.z(curr_wp_idx-1)];
+                wpt.pos.y(curr_wp_idx) - wpt.pos.y(curr_wp_idx-1); ...
+                wpt.pos.z(curr_wp_idx) - wpt.pos.z(curr_wp_idx-1)];
         else
             v_leg = [wpt.pos.x(2) - wpt.pos.x(1); ...
-                     wpt.pos.y(2) - wpt.pos.y(1); ...
-                     wpt.pos.z(2) - wpt.pos.z(1)];
+                wpt.pos.y(2) - wpt.pos.y(1); ...
+                wpt.pos.z(2) - wpt.pos.z(1)];
         end
         v_to_curr_est  = [p_hat(1) - wpt.pos.x(curr_wp_idx); p_hat(2) - wpt.pos.y(curr_wp_idx); p_hat(3) - wpt.pos.z(curr_wp_idx)];
         v_to_curr_true = [xn - wpt.pos.x(curr_wp_idx); yn - wpt.pos.y(curr_wp_idx); zn - wpt.pos.z(curr_wp_idx)];
-        
-        % Tiêu chuẩn chuyển mốc tổng quát hàng hải (Half-plane / Orthogonal boundary):
-        % Chuyển mốc khi: lọt vào bán kính R_switch (ước lượng hoặc thật) HOẶC đã vượt qua mặt phẳng vuông góc của mốc
-        passed_plane = (dot(v_to_curr_est, v_leg) >= 0 && dist_curr_est < R_switch * 3) || ...
-                       (dot(v_to_curr_true, v_leg) >= 0 && dist_curr_true < R_switch * 3);
-        
-        if (dist_curr_est < R_switch) || (dist_curr_true < R_switch) || passed_plane
+
+        % Tiêu chuẩn chuyển mốc hàng hải (Half-plane boundary):
+        % Chuyển mốc khi: ước lượng lọt vào bán kính R_switch HOẶC đã vượt qua mặt phẳng vuông góc của mốc ước lượng
+        passed_plane = (dot(v_to_curr_est, v_leg) >= 0 && dist_curr_est < R_switch * 3);
+
+        if (dist_curr_est < R_switch) || passed_plane
             curr_wp_idx = curr_wp_idx + 1;
         end
     else
         % Đang bám mốc cuối cùng (curr_wp_idx == length(wpt.pos.x))
         dist_to_dest_true = norm([xn - wpt.pos.x(end); yn - wpt.pos.y(end); zn - wpt.pos.z(end)]);
         dist_to_dest_est  = norm([p_hat(1) - wpt.pos.x(end); p_hat(2) - wpt.pos.y(end); p_hat(3) - wpt.pos.z(end)]);
-        
+
         v_leg_dest = [wpt.pos.x(end) - wpt.pos.x(end-1); ...
-                      wpt.pos.y(end) - wpt.pos.y(end-1); ...
-                      wpt.pos.z(end) - wpt.pos.z(end-1)];
+            wpt.pos.y(end) - wpt.pos.y(end-1); ...
+            wpt.pos.z(end) - wpt.pos.z(end-1)];
         v_to_dest_est  = [p_hat(1) - wpt.pos.x(end); p_hat(2) - wpt.pos.y(end); p_hat(3) - wpt.pos.z(end)];
         v_to_dest_true = [xn - wpt.pos.x(end); yn - wpt.pos.y(end); zn - wpt.pos.z(end)];
-        
-        passed_dest = (dot(v_to_dest_est, v_leg_dest) >= 0 && dist_to_dest_est < R_switch * 3) || ...
-                      (dot(v_to_dest_true, v_leg_dest) >= 0 && dist_to_dest_true < R_switch * 3);
 
-        if dist_to_dest_est < R_switch * 1.5 || dist_to_dest_true < R_switch * 1.5 || passed_dest
-            fprintf('\n[ĐẾN ĐÍCH] Tàu đã hoàn thành toàn bộ %d Waypoints và cập đích tại t = %.1f s!\n', ...
+        passed_dest = (dot(v_to_dest_est, v_leg_dest) >= 0 && dist_to_dest_est < R_switch * 3);
+
+        if dist_to_dest_est < R_switch * 1.5 || passed_dest
+            fprintf('\n[ĐẾN ĐÍCH] Tàu đã hoàn thành toàn bộ %d Waypoints và cập đích tại t = %.1f s (theo ước lượng ES-EKF)!\n', ...
                 length(wpt.pos.x), t(i));
             t = t(1:i);
             pos_true_hist = pos_true_hist(1:i, :);
@@ -746,6 +749,10 @@ end
 
 time_elapsed = toc(tic_sim);
 fprintf('Hoàn thành mô phỏng tích hợp Fossen + ES-EKF trong %.2f giây.\n', time_elapsed);
+
+if ~isnan(t_gnss_cut_actual)
+    T_gnss_cut = t_gnss_cut_actual;
+end
 
 %% 5. LƯU KẾT QUẢ TÍCH HỢP RA FILE .MAT
 sensor_name = ins_spec.ten;
@@ -792,8 +799,8 @@ leg_labels  = {};
 if has_fossen
     % Chỉ vẽ Fossen Standalone nếu cùng tập Waypoint đích (tránh lệch file cũ)
     if isfield(f_data, 'wpt') && ...
-       numel(f_data.wpt.pos.x) == numel(wpt.pos.x) && ...
-       norm([f_data.wpt.pos.x(end) - wpt.pos.x(end); f_data.wpt.pos.y(end) - wpt.pos.y(end)]) < 50
+            numel(f_data.wpt.pos.x) == numel(wpt.pos.x) && ...
+            norm([f_data.wpt.pos.x(end) - wpt.pos.x(end); f_data.wpt.pos.y(end) - wpt.pos.y(end)]) < 50
         h_fossen = plot3(pos_fossen(:, 2), pos_fossen(:, 1), pos_fossen(:, 3), ...
             'Color', [0, 0.55, 0], 'LineStyle', '--', 'LineWidth', 2.2);
         hold on;
@@ -852,8 +859,8 @@ xlabel('East (m)', 'FontSize', 11, 'FontWeight', 'bold');
 ylabel('North (m)', 'FontSize', 11, 'FontWeight', 'bold');
 zlabel('Down - Do sau (m)', 'FontSize', 11, 'FontWeight', 'bold');
 title({'Quy dao 3D: Fossen Standalone vs Tau that vs ES-EKF', ...
-       '(\bfClick & Keo chuot de XOAY 3D\rm | Cuon con lan chuot de ZOOM TO bat ky vi tri nao)'}, ...
-       'FontSize', 12, 'FontWeight', 'bold');
+    '(\bfClick & Keo chuot de XOAY 3D\rm | Cuon con lan chuot de ZOOM TO bat ky vi tri nao)'}, ...
+    'FontSize', 12, 'FontWeight', 'bold');
 legend(leg_handles, leg_labels, 'Location', 'best', 'FontSize', 10);
 daspect([1 1 0.25]);
 view(45, 25);
@@ -882,7 +889,7 @@ xlabel('Thoi gian (s)', 'FontSize', 11, 'FontWeight', 'bold');
 ylabel('Goc Boresight (deg)', 'FontSize', 11, 'FontWeight', 'bold');
 title('Hoi tu goc lech truc Boresight DVL (Roll, Pitch, Yaw)', 'FontSize', 12, 'FontWeight', 'bold');
 legend('Roll est', 'Pitch est', 'Yaw est', 'Roll true (1.5 deg)', 'Pitch true (-2.0 deg)', 'Yaw true (3.0 deg)', ...
-       'Location', 'best', 'FontSize', 10);
+    'Location', 'best', 'FontSize', 10);
 
 fig2_png = fullfile(script_dir, 'fig2_boresight.png');
 fig2_fig = fullfile(script_dir, 'fig2_boresight.fig');

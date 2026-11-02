@@ -58,9 +58,9 @@ err_3D = sqrt(err_N.^2 + err_E.^2 + err_D.^2);
 idx_gnss = (t <= T_cut);
 idx_dive = (t > T_cut);
 
-% 2. Thống kê RMS, Mean, Max, Final
-rms_err = @(x) sqrt(mean(x.^2));
-max_abs = @(x) max(abs(x));
+% 2. Thống kê RMS, Mean, Max, Final (bỏ qua NaN ở giai đoạn căn chỉnh ban đầu)
+rms_err = @(x) sqrt(mean(x(~isnan(x)).^2));
+max_abs = @(x) max(abs(x(~isnan(x))));
 
 % Toàn bộ hành trình
 rms_N = rms_err(err_N);
