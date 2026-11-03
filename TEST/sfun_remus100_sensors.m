@@ -226,9 +226,10 @@ if mod(st.step_count, dvl_step) == 0
     H_horiz = F * cos(I);
     m_ned = [H_horiz * cos(D); H_horiz * sin(D); F * sin(I)];
     
-    is_submerged = (p_ned(3) > 0.5);
+    t_curr = st.step_count * dt;
+    is_submerged = (t_curr >= 410.0 && p_ned(3) > 0.5) || st.gnss_cut_done;
     if is_submerged
-        yaw_err_deg = 1.0;
+        yaw_err_deg = 0.5;
         if evalin('base', 'exist(''injected_yaw_submerged_deg'', ''var'')')
             yaw_err_deg = evalin('base', 'injected_yaw_submerged_deg');
         end
@@ -251,15 +252,19 @@ if mod(st.step_count, dvl_step) == 0
     flags(4) = 1;
 
     % --- (d) GNSS RTK (5 Hz) ---
-    % Nước biển hấp thụ hoàn toàn sóng vệ tinh khi ăng-ten chìm sâu > 0.5m
-    if p_ned(3) > 0.5
-        flags(1) = 0; % Mất tín hiệu GNSS hoàn toàn khi lặn ngầm
-    else
+    % Nước biển hấp thụ hoàn toàn sóng vệ tinh khi tàu lặn ngầm chìm sâu > 0.5m
+    if t_curr >= 410.0 && p_ned(3) > 0.5 && ~st.gnss_cut_done
+        st.gnss_cut_done = true;
+    end
+
+    if ~st.gnss_cut_done
         pos_noise = [p.ins_spec.gnss.pos_h * randn; p.ins_spec.gnss.pos_h * randn; p.ins_spec.gnss.pos_v * randn];
         vel_noise = p.ins_spec.gnss.vel * randn(3, 1);
         gnss_meas = [p_ned + pos_noise; v_ned + vel_noise; NaN]; % Đơn ăng-ten (không đo yaw)
         block.Dwork(4).Data = gnss_meas;
         flags(1) = 1;
+    else
+        flags(1) = 0; % Mất tín hiệu GNSS hoàn toàn khi lặn ngầm
     end
 
     block.Dwork(6).Data = flags;

@@ -1,17 +1,58 @@
-function run_simulink_remus100_esekf(sim_time, injected_yaw_deg)
+function run_simulink_remus100_esekf(arg1, arg2)
 %RUN_SIMULINK_REMUS100_ESEKF Chạy kiểm chứng mô hình Simulink tích hợp REMUS 100 + ES-EKF 100 Hz
 %   Mô hình: TEST/remus100_esekf_integrated.slx
-%   Cú pháp:
-%       run_simulink_remus100_esekf()              % Chạy kiểm thử Stress Test lệch 2.0 độ (mặc định)
-%       run_simulink_remus100_esekf([], 0)         % Chạy kịch bản cơ sở chuẩn (0 độ lệch)
-%       run_simulink_remus100_esekf([], 2.0)       % Chạy bơm lệch 2.0 độ lúc chìm
-%       run_simulink_remus100_esekf(600, 2.0)      % Chạy nhanh 600 giây đầu với lệch 2.0 độ
+%   Cú pháp gọi linh hoạt trên MATLAB Command Line:
+%       run_simulink_remus100_esekf()              % Chạy với góc lệch mặc định 0.5 độ (2668s)
+%       run_simulink_remus100_esekf(0.5)           % Gõ trực tiếp góc lệch mong muốn (0.5 độ) từ Command Line
+%       run_simulink_remus100_esekf(0.5, 2668)     % Truyền góc lệch (0.5 độ) và thời gian mô phỏng (2668s)
+%       run_simulink_remus100_esekf(2668, 0.5)     % Hoặc truyền thời gian mô phỏng trước, góc lệch sau
+%       run_simulink_remus100_esekf([], 0.5)       % Thời gian mặc định, góc lệch 0.5 độ
 
-if nargin < 1 || isempty(sim_time)
-    sim_time = 2668; % Thời gian hoàn thành 12 Waypoints
-end
-if nargin < 2 || isempty(injected_yaw_deg)
-    injected_yaw_deg = 1.0; % Mặc định 1.0 độ cho kịch bản Stress Test
+default_sim_time = 2668; % Thời gian hoàn thành 12 Waypoints
+default_yaw_deg  = 0.5;  % Mặc định 0.5 độ cho kịch bản Stress Test
+
+% Tự động nhận diện tham số truyền vào từ Command Line
+if nargin == 0
+    sim_time = default_sim_time;
+    if evalin('base', 'exist(''injected_yaw_submerged_deg'', ''var'')')
+        injected_yaw_deg = evalin('base', 'injected_yaw_submerged_deg');
+    else
+        injected_yaw_deg = default_yaw_deg;
+    end
+elseif nargin == 1
+    if isempty(arg1)
+        sim_time = default_sim_time;
+        injected_yaw_deg = default_yaw_deg;
+    elseif abs(arg1) <= 45
+        % Người dùng truyền trực tiếp góc lệch mong muốn, ví dụ: run_simulink_remus100_esekf(0.5)
+        injected_yaw_deg = arg1;
+        sim_time = default_sim_time;
+    else
+        % Người dùng truyền thời gian chạy mô phỏng, ví dụ: run_simulink_remus100_esekf(600)
+        sim_time = arg1;
+        if evalin('base', 'exist(''injected_yaw_submerged_deg'', ''var'')')
+            injected_yaw_deg = evalin('base', 'injected_yaw_submerged_deg');
+        else
+            injected_yaw_deg = default_yaw_deg;
+        end
+    end
+else % nargin >= 2
+    if isempty(arg1)
+        sim_time = default_sim_time;
+        injected_yaw_deg = arg2;
+    elseif abs(arg1) <= 45 && ~isempty(arg2) && arg2 > 45
+        % Thứ tự: (injected_yaw_deg, sim_time), ví dụ: (0.5, 2668)
+        injected_yaw_deg = arg1;
+        sim_time = arg2;
+    else
+        % Thứ tự: (sim_time, injected_yaw_deg), ví dụ: (2668, 0.5)
+        sim_time = arg1;
+        if isempty(arg2)
+            injected_yaw_deg = default_yaw_deg;
+        else
+            injected_yaw_deg = arg2;
+        end
+    end
 end
 
 script_dir = fileparts(mfilename('fullpath'));
@@ -25,6 +66,7 @@ addpath(genpath(fullfile(root_dir, 'AUV_simulation', 'MSS')));
 
 fprintf('=== CHẠY MÔ PHỎNG SIMULINK TÍCH HỢP REMUS 100 + ES-EKF (100 HZ) ===\n');
 fprintf('Kịch bản: Bơm sai số góc hướng khi chìm = %+.2f độ\n', injected_yaw_deg);
+fprintf('Hello World\n');
 
 % 1. Nạp toàn bộ tham số vào Workspace
 init_remus100_esekf_simulink(injected_yaw_deg);
@@ -145,27 +187,44 @@ err_scale = abs(final_scale - true_scale_pct);
 diff_pos = diff(pos_true_hist, 1, 1);
 dist_step = sqrt(sum(diff_pos.^2, 2));
 total_dist = sum(dist_step);
-pct_dt = (pos_err_norm(end) / max(total_dist, 1)) * 100;
 
-idx_dive = find(pos_true_hist(:, 3) > 0.5, 1);
-if isempty(idx_dive), idx_dive = 1; end
-dist_dive = sum(dist_step(idx_dive:end));
+% Xác định chính xác chặng lặn ngầm (>0.5m) sau chặng chạy nổi hiệu chuẩn (t >= 410s)
+idx_dive = find(t >= 410.0 & pos_true_hist(:, 3) > 0.5, 1);
+if isempty(idx_dive)
+    dist_surface = total_dist;
+    dist_dive    = 0;
+    pct_dt_dive  = 0;
+    t_dive       = t(end);
+else
+    t_dive       = t(idx_dive);
+    dist_surface = sum(dist_step(1:max(1, idx_dive-1)));
+    dist_dive    = sum(dist_step(idx_dive:end));
+    pct_dt_dive  = (pos_err_norm(end) / max(dist_dive, 1)) * 100;
+end
+pct_dt_total = (pos_err_norm(end) / max(total_dist, 1)) * 100;
 
 fprintf('\n================== KẾT QUẢ ĐỊNH LƯỢNG MÔ PHỎNG SIMULINK ==================\n');
-fprintf('Kịch bản kiểm thử           : Bơm sai số góc hướng khi chìm = %+.2f độ\n', injected_yaw_deg);
-fprintf('Boresight Roll              : Ước lượng = %6.3f deg | Thật = %6.3f deg | Sai số = %6.3f deg (%s)\n', ...
+fprintf('Kịch bản kiểm thử             : Bơm sai số góc hướng khi chìm = %+.2f độ\n', injected_yaw_deg);
+fprintf('Boresight Roll                : Ước lượng = %6.3f deg | Thật = %6.3f deg | Sai số = %6.3f deg (%s)\n', ...
     final_bs(1), true_bs_deg(1), err_bs(1), pass_str(err_bs(1) < 0.6));
-fprintf('Boresight Pitch             : Ước lượng = %6.3f deg | Thật = %6.3f deg | Sai số = %6.3f deg (%s)\n', ...
+fprintf('Boresight Pitch               : Ước lượng = %6.3f deg | Thật = %6.3f deg | Sai số = %6.3f deg (%s)\n', ...
     final_bs(2), true_bs_deg(2), err_bs(2), pass_str(err_bs(2) < 0.6));
-fprintf('Boresight Yaw               : Ước lượng = %6.3f deg | Thật = %6.3f deg | Sai số = %6.3f deg (%s)\n', ...
+fprintf('Boresight Yaw                 : Ước lượng = %6.3f deg | Thật = %6.3f deg | Sai số = %6.3f deg (%s)\n', ...
     final_bs(3), true_bs_deg(3), err_bs(3), pass_str(err_bs(3) < 0.6));
-fprintf('Scale Factor DVL            : Ước lượng = %6.3f %%   | Thật = %6.3f %%   | Sai số = %6.3f %%   (%s)\n', ...
+fprintf('Scale Factor DVL              : Ước lượng = %6.3f %%   | Thật = %6.3f %%   | Sai số = %6.3f %%   (%s)\n', ...
     final_scale, true_scale_pct, err_scale, pass_str(err_scale < 1.0));
-fprintf('Tổng cự ly hành trình       : %.2f km (%.1f m)\n', total_dist / 1000, total_dist);
-fprintf('Quãng đường lặn ngầm (z>0.5m): %.2f km (%.1f m)\n', dist_dive / 1000, dist_dive);
-fprintf('Sai số vị trí 3D cuối cùng  : %.2f m sau %.1f s\n', pos_err_norm(end), t(end));
-fprintf('Tỉ lệ sai số / Tổng quãng đường: %.3f %% DT (Chuẩn < 1.0 %% DT: %s)\n', pct_dt, pass_str(pct_dt < 1.0));
-fprintf('Độ trôi ngang lý thuyết     : %.2f m (theo công thức D_ngầm x sin(%.1f°))\n', dist_dive * abs(sin(deg2rad(injected_yaw_deg))), injected_yaw_deg);
+fprintf('-------------------------------------------------------------------------\n');
+fprintf('Chặng chạy nổi hiệu chuẩn (WP1-7): %.2f km (%.1f m) trong %.1f s (có GNSS RTK)\n', ...
+    dist_surface / 1000, dist_surface, t_dive);
+fprintf('Chặng lặn ngầm mất GNSS (z>0.5m) : %.2f km (%.1f m) từ t = %.1f s đến %.1f s\n', ...
+    dist_dive / 1000, dist_dive, t_dive, t(end));
+fprintf('Tổng cự ly hành trình Remus 100 : %.2f km (%.1f m) trong %.1f s (~%.1f phút)\n', ...
+    total_dist / 1000, total_dist, t(end), t(end)/60);
+fprintf('Sai số vị trí 3D tại điểm đích: %.2f m (Đích đến WP12)\n', pos_err_norm(end));
+fprintf('Tỉ lệ dạt / Cự ly lặn ngầm    : %.3f %% DT (Chuẩn hàng hải < 1.0 %% DT: %s)\n', ...
+    pct_dt_dive, pass_str(pct_dt_dive < 1.0));
+fprintf('Độ trôi ngang lý thuyết       : %.2f m (theo công thức D_ngầm x sin(%.1f°))\n', ...
+    dist_dive * abs(sin(deg2rad(injected_yaw_deg))), injected_yaw_deg);
 fprintf('=========================================================================\n');
 
 if bdIsLoaded(mdl)

@@ -3,7 +3,7 @@ function init_remus100_esekf_simulink(injected_yaw_deg)
 %   Nạp thông số cảm biến (VN-210-S, DVL A125 0.15%, Bar10XT), thông số bộ lọc ES-EKF 19 trạng thái,
 %   thông số bộ điều khiển ALOS3D & Autopilot và 12 Waypoints nhiệm vụ.
 %   Tham số:
-%       injected_yaw_deg - Góc lệch hướng bơm vào EKF lúc bắt đầu lặn (độ, mặc định: 1.0 deg).
+%       injected_yaw_deg - Góc lệch hướng bơm vào EKF lúc bắt đầu lặn (độ, mặc định: 0.5 deg).
 
 script_dir = fileparts(mfilename('fullpath'));
 root_dir = fileparts(script_dir);
@@ -117,9 +117,13 @@ assignin('base', 'betaVc', betaVc);
 assignin('base', 'true_boresight', true_boresight);
 assignin('base', 'true_scale', true_scale);
 
-% 6. Góc lệch hướng bơm vào EKF lúc bắt đầu lặn ngầm (mặc định 1.0 độ theo yêu cầu test)
+% 6. Góc lệch hướng bơm vào EKF lúc bắt đầu lặn ngầm (mặc định 0.5 độ theo yêu cầu test)
 if nargin < 1 || isempty(injected_yaw_deg)
-    injected_yaw_deg = 1.0;
+    if evalin('base', 'exist(''injected_yaw_submerged_deg'', ''var'')')
+        injected_yaw_deg = evalin('base', 'injected_yaw_submerged_deg');
+    else
+        injected_yaw_deg = 0.5;
+    end
 end
 assignin('base', 'injected_yaw_submerged_deg', injected_yaw_deg);
 

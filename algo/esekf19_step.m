@@ -125,16 +125,11 @@ F(7:9, 13:15) = -eye(3)*dt;
 F(10:12, 10:12) = phi_acc * eye(3);
 
 % Lan truyền ma trận P: P_k = F * P_(k-1) * F' + Q
-% Tự động nhận diện trạng thái lặn ngầm theo cảm biến áp kế đo sâu:
+% Tự động nhận diện trạng thái lặn ngầm theo cảm biến áp kế đo sâu (> 0.5m):
 % Nước biển hấp thụ hoàn toàn sóng vệ tinh GNSS ở độ sâu > 0.5m.
-% Khi lặn ngầm: Thuật toán tự động ngắt cập nhật GNSS và tự động khóa hiệu chuẩn Boresight/Scale.
-is_submerged = (measurement_flags(2) ~= 0 && depth_meas > 0.5) || (position(3) > 0.5);
-if is_submerged
-    measurement_flags(1) = 0; % Tự động vô hiệu hóa GNSS khi ngập nước
-    lock_calib = true;        % Tự động khóa hiệu chuẩn Boresight & Scale Factor
-else
-    lock_calib = (length(cfg) >= 21 && cfg(21) ~= 0);
-end
+% Khi lặn ngầm mất GNSS: Thuật toán tự động khóa hiệu chuẩn Boresight & Scale Factor.
+is_submerged = (measurement_flags(1) == 0 && ((measurement_flags(2) ~= 0 && depth_meas > 0.5) || (position(3) > 0.5)));
+lock_calib = is_submerged || (length(cfg) >= 21 && cfg(21) ~= 0);
 
 if lock_calib
     process_noise(16:19, 16:19) = 0;

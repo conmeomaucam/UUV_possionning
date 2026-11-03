@@ -227,11 +227,12 @@ N_level = round(2.0 / h); % 2 giây leveling = 200 mẫu ở 100 Hz
 N_head  = 5;              % 5 mẫu đo hướng (1 giây ở 5 Hz)
 upd_stat = zeros(4, 1);
 
-% Quản lý tự động khóa GNSS khi lặn ngầm theo độ sâu đo được từ cảm biến áp suất
-if flags(2) ~= 0 && depth_meas > 0.5 && gnss_cut == 0
+% Quản lý tự động khóa GNSS khi lặn ngầm theo độ sâu đo được từ cảm biến áp suất (> 0.5m)
+% sau khi hoàn thành chặng nổi hiệu chuẩn Boresight (t >= 410s)
+if t_curr >= 410.0 && flags(2) ~= 0 && depth_meas > 0.5 && gnss_cut == 0
     gnss_cut = 1;
     % Bơm bước nhảy sai số góc hướng vào EKF tại thời điểm bắt đầu lặn ngầm
-    yaw_bias_deg = 1.0;
+    yaw_bias_deg = 0.5;
     if evalin('base', 'exist(''injected_yaw_submerged_deg'', ''var'')')
         yaw_bias_deg = evalin('base', 'injected_yaw_submerged_deg');
     end
@@ -244,11 +245,11 @@ if flags(2) ~= 0 && depth_meas > 0.5 && gnss_cut == 0
                  qc(3)*dq(1) - qc(2)*dq(4); ...
                  qc(1)*dq(4) + qc(4)*dq(1)];
         state_est(7:10) = q_new / norm(q_new);
-        fprintf('\n[EKF FAULT INJECTION] Tàu lặn độ sâu = %.2f m: Đã bơm sai số hướng %+5.2f độ vào EKF!\n', ...
-            depth_meas, yaw_bias_deg);
+        fprintf('\n[EKF FAULT INJECTION] Tàu lặn độ sâu = %.2f m (> 0.5m tại t = %.1f s): Đã bơm sai số hướng %+5.2f độ vào EKF!\n', ...
+            depth_meas, t_curr, yaw_bias_deg);
     end
 end
-if depth_meas > 0.5
+if gnss_cut == 1
     flags(1) = 0;   % Tự động vô hiệu hóa GNSS khi ngập nước
     cfg(21)  = 1;   % Tự động khóa hiệu chuẩn Boresight và Scale Factor
 else
